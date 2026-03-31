@@ -4,6 +4,63 @@ import (
 	"testing"
 )
 
+func TestResolveName_ExplicitName(t *testing.T) {
+	cfg := NetworkConfig{Name: "my-custom-net"}
+	name := ResolveName("proxy", cfg)
+	if name != "my-custom-net" {
+		t.Errorf("ResolveName() = %q, want %q", name, "my-custom-net")
+	}
+}
+
+func TestResolveName_FallsBackToKey(t *testing.T) {
+	cfg := NetworkConfig{}
+	name := ResolveName("proxy", cfg)
+	if name != "proxy" {
+		t.Errorf("ResolveName() = %q, want %q", name, "proxy")
+	}
+}
+
+func TestResolveNames_MixedConfig(t *testing.T) {
+	networks := map[string]NetworkConfig{
+		"proxy":    {Name: "my-proxy"},
+		"internal": {},
+		"backend":  {Name: "custom-backend"},
+	}
+
+	names := ResolveNames(networks)
+
+	if len(names) != 3 {
+		t.Fatalf("expected 3 names, got %d", len(names))
+	}
+	if !names["my-proxy"] {
+		t.Error("missing 'my-proxy'")
+	}
+	if !names["internal"] {
+		t.Error("missing 'internal'")
+	}
+	if !names["custom-backend"] {
+		t.Error("missing 'custom-backend'")
+	}
+	// The map key "proxy" should NOT appear — it's overridden by name: "my-proxy"
+	if names["proxy"] {
+		t.Error("'proxy' should not be in names — it was overridden by 'my-proxy'")
+	}
+}
+
+func TestResolveNames_EmptyMap(t *testing.T) {
+	names := ResolveNames(map[string]NetworkConfig{})
+	if len(names) != 0 {
+		t.Errorf("expected 0 names, got %d", len(names))
+	}
+}
+
+func TestResolveNames_NilMap(t *testing.T) {
+	names := ResolveNames(nil)
+	if len(names) != 0 {
+		t.Errorf("expected 0 names, got %d", len(names))
+	}
+}
+
 func TestConvertIPAM_ValidConfig(t *testing.T) {
 	src := &IPAM{
 		Driver: "default",

@@ -19,22 +19,19 @@ type Reconciler struct {
 	configFile string
 	decryptor  *sops.Decryptor
 	compose    *stacks.ComposeClient
+	networks   *networks.Manager
 	logger     *slog.Logger
-
-	// Track previously deployed stacks for removal detection.
-	// Maps stack name → compose file path.
-	knownStacks map[string]string
 }
 
 // New creates a new Reconciler.
-func New(repoDir, configFile string, decryptor *sops.Decryptor, compose *stacks.ComposeClient, logger *slog.Logger) *Reconciler {
+func New(repoDir, configFile string, decryptor *sops.Decryptor, compose *stacks.ComposeClient, networkMgr *networks.Manager, logger *slog.Logger) *Reconciler {
 	return &Reconciler{
-		repoDir:     repoDir,
-		configFile:  configFile,
-		decryptor:   decryptor,
-		compose:     compose,
-		logger:      logger,
-		knownStacks: make(map[string]string),
+		repoDir:    repoDir,
+		configFile: configFile,
+		decryptor:  decryptor,
+		compose:    compose,
+		networks:   networkMgr,
+		logger:     logger,
 	}
 }
 
@@ -44,12 +41,22 @@ func New(repoDir, configFile string, decryptor *sops.Decryptor, compose *stacks.
 // 3. Decrypt global secrets
 // 4. Discover stacks
 // 5. Deploy each stack
-// 6. Remove stacks no longer in the repo
+// 6. Remove stacks that were present before the pull but are now gone
+// 7. Remove networks that were present before the pull but are now gone
+//
+// The removedStacks and removedNetworks parameters contain names that existed
+// in the worktree before the latest git pull but no longer exist after it.
+// These are the only resources that will be torn down — resources that were
+// never managed by conflux are never touched. Pass nil to skip removals
+// (e.g. on initial clone when there is no prior state to compare against).
+//
+// Networks are removed after stacks so that stacks still using a network
+// are torn down before the network itself is removed.
 //
 // Decrypted secrets are held in memory and written to temporary files only
 // for the duration of compose loading. Temp files are removed immediately
 // after each reconciliation cycle completes.
-func (r *Reconciler) Reconcile(ctx context.Context) error {
+func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetworks []string) error {
 	r.logger.Info("starting reconciliation")
 
 	// Track temp files so we can clean them all up at the end
@@ -64,7 +71,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	}()
 
 	// 1. Parse config
-	cfg, err := config.Load(r.repoDir, r.configFile)
+	cfg, err := r.loadConfig()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
@@ -78,7 +85,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	// 2. Ensure global networks exist before any stacks are deployed
 	if len(cfg.Networks) > 0 {
 		r.logger.Info("ensuring networks", "count", len(cfg.Networks))
-		if err := networks.Ensure(ctx, cfg.Networks, r.logger); err != nil {
+		if err := r.networks.Ensure(ctx, cfg.Networks); err != nil {
 			return fmt.Errorf("ensuring networks: %w", err)
 		}
 	}
@@ -89,11 +96,11 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		return fmt.Errorf("resolving global env files: %w", err)
 	}
 
-	globalSecretFiles, tmpPaths, err := r.decryptSecretFiles(cfg.Global.Secrets, r.repoDir)
+	globalSecretFiles, err := r.decryptSecretFiles(cfg.Global.Secrets, r.repoDir)
 	if err != nil {
 		return fmt.Errorf("resolving global secret files: %w", err)
 	}
-	tempFiles = append(tempFiles, tmpPaths...)
+	tempFiles = append(tempFiles, globalSecretFiles...)
 
 	// 4. Discover stacks
 	discovered, err := stacks.Discover(r.repoDir, cfg)
@@ -102,13 +109,8 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	}
 	r.logger.Info("stacks discovered", "count", len(discovered))
 
-	// Track current stack names for removal detection
-	currentStacks := make(map[string]bool)
-
 	// 5. Deploy each stack
 	for _, stack := range discovered {
-		currentStacks[stack.Name] = true
-
 		stackTmpPaths, err := r.deployStack(ctx, stack, cfg, globalEnvFiles, globalSecretFiles)
 		if err != nil {
 			r.logger.Error("failed to deploy stack", "stack", stack.Name, "error", err)
@@ -118,26 +120,28 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		tempFiles = append(tempFiles, stackTmpPaths...)
 	}
 
-	// 6. Remove stacks that are no longer in the repo
-	for name := range r.knownStacks {
-		if currentStacks[name] {
-			continue
-		}
-
+	// 6. Remove stacks that were present before the pull but are now gone
+	for _, name := range removedStacks {
 		r.logger.Info("stack removed from repo, tearing down", "stack", name)
 		if err := r.compose.Down(ctx, name); err != nil {
 			r.logger.Error("failed to remove stack", "stack", name, "error", err)
 		}
-
-		delete(r.knownStacks, name)
 	}
 
-	// Update known stacks
-	for name := range currentStacks {
-		r.knownStacks[name] = name
+	// 7. Remove networks that were present before the pull but are now gone.
+	//    This happens after stack removal so containers are torn down first.
+	if len(removedNetworks) > 0 {
+		r.logger.Info("removing networks", "count", len(removedNetworks))
+		if err := r.networks.Remove(ctx, removedNetworks); err != nil {
+			r.logger.Error("failed to remove networks", "error", err)
+		}
 	}
 
-	r.logger.Info("reconciliation complete", "deployed", len(discovered))
+	r.logger.Info("reconciliation complete",
+		"deployed", len(discovered),
+		"removed_stacks", len(removedStacks),
+		"removed_networks", len(removedNetworks),
+	)
 	return nil
 }
 
@@ -156,9 +160,9 @@ func (r *Reconciler) resolveGlobalEnvFiles(cfg *config.Config) ([]string, error)
 }
 
 // decryptSecretFiles decrypts a list of secret files (relative to baseDir) and
-// writes each to a temporary file. It returns the temp file paths for use as
-// env-files and also returns the list of temp paths for cleanup tracking.
-func (r *Reconciler) decryptSecretFiles(secrets []string, baseDir string) (envPaths []string, tempPaths []string, err error) {
+// writes each to a temporary file. It returns the temp file paths which serve
+// double duty as both env-file arguments and cleanup targets.
+func (r *Reconciler) decryptSecretFiles(secrets []string, baseDir string) (tmpPaths []string, err error) {
 	for _, f := range secrets {
 		srcPath := filepath.Join(baseDir, f)
 		if _, statErr := os.Stat(srcPath); os.IsNotExist(statErr) {
@@ -168,29 +172,28 @@ func (r *Reconciler) decryptSecretFiles(secrets []string, baseDir string) (envPa
 
 		data, decErr := r.decryptor.Decrypt(srcPath)
 		if decErr != nil {
-			return nil, tempPaths, fmt.Errorf("decrypting secret %s: %w", f, decErr)
+			return tmpPaths, fmt.Errorf("decrypting secret %s: %w", f, decErr)
 		}
 
 		tmpFile, tmpErr := os.CreateTemp("", "conflux-secret-*.env")
 		if tmpErr != nil {
-			return nil, tempPaths, fmt.Errorf("creating temp file for %s: %w", f, tmpErr)
+			return tmpPaths, fmt.Errorf("creating temp file for %s: %w", f, tmpErr)
 		}
 
 		if _, writeErr := tmpFile.Write(data); writeErr != nil {
 			tmpFile.Close()
-			return nil, tempPaths, fmt.Errorf("writing temp file for %s: %w", f, writeErr)
+			return tmpPaths, fmt.Errorf("writing temp file for %s: %w", f, writeErr)
 		}
 		tmpFile.Close()
 
 		// Restrict permissions — only the current process needs to read this
 		if chmodErr := os.Chmod(tmpFile.Name(), 0600); chmodErr != nil {
-			return nil, tempPaths, fmt.Errorf("setting permissions on temp file for %s: %w", f, chmodErr)
+			return tmpPaths, fmt.Errorf("setting permissions on temp file for %s: %w", f, chmodErr)
 		}
 
-		envPaths = append(envPaths, tmpFile.Name())
-		tempPaths = append(tempPaths, tmpFile.Name())
+		tmpPaths = append(tmpPaths, tmpFile.Name())
 	}
-	return envPaths, tempPaths, nil
+	return tmpPaths, nil
 }
 
 // deployStack builds the env file list and deploys a single stack.
@@ -222,7 +225,7 @@ func (r *Reconciler) deployStack(ctx context.Context, stack stacks.Stack, cfg *c
 	var tempPaths []string
 	if len(stack.SecretFiles) > 0 {
 		r.logger.Debug("adding stack-level secrets", "stack", stack.Name)
-		stackSecretPaths, tmpPaths, err := r.decryptSecretFiles(
+		stackSecretPaths, err := r.decryptSecretFiles(
 			toRelativePaths(stack.SecretFiles, stack.Dir),
 			stack.Dir,
 		)
@@ -230,13 +233,74 @@ func (r *Reconciler) deployStack(ctx context.Context, stack stacks.Stack, cfg *c
 			return nil, fmt.Errorf("decrypting stack secrets for %s: %w", stack.Name, err)
 		}
 		envFiles = append(envFiles, stackSecretPaths...)
-		tempPaths = tmpPaths
+		tempPaths = stackSecretPaths
 	}
 
 	if err := r.compose.Up(ctx, stack, envFiles); err != nil {
 		return tempPaths, err
 	}
 	return tempPaths, nil
+}
+
+// loadConfig loads and returns the parsed configuration. This is the single
+// entry point for config loading in the reconciler — previously each
+// discovery method and Reconcile() independently called config.Load().
+func (r *Reconciler) loadConfig() (*config.Config, error) {
+	return config.Load(r.repoDir, r.configFile)
+}
+
+// Snapshot returns both stack names and network names from the current worktree
+// by loading the config only once. Previously snapshotState called
+// DiscoverStackNames + DiscoverNetworkNames which each loaded config
+// independently — 2 redundant parses per snapshot, 4 per poll cycle.
+func (r *Reconciler) Snapshot() (stackNames map[string]bool, networkNames map[string]bool, err error) {
+	cfg, err := r.loadConfig()
+	if err != nil {
+		return nil, nil, fmt.Errorf("loading config: %w", err)
+	}
+
+	stackNames, err = discoverStackNames(r.repoDir, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	networkNames = networks.ResolveNames(cfg.Networks)
+	return stackNames, networkNames, nil
+}
+
+// DiscoverStackNames returns the set of stack names present in the current
+// worktree. This is a lightweight operation that only reads the filesystem
+// and config — it does not load compose projects or contact Docker.
+func (r *Reconciler) DiscoverStackNames() (map[string]bool, error) {
+	cfg, err := r.loadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("loading config: %w", err)
+	}
+	return discoverStackNames(r.repoDir, cfg)
+}
+
+// DiscoverNetworkNames returns the set of effective network names defined in
+// the current worktree's config. This resolves explicit "name" fields vs map
+// keys, matching the same logic that Ensure() uses.
+func (r *Reconciler) DiscoverNetworkNames() (map[string]bool, error) {
+	cfg, err := r.loadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("loading config: %w", err)
+	}
+	return networks.ResolveNames(cfg.Networks), nil
+}
+
+// discoverStackNames is the internal helper that works with an already-loaded config.
+func discoverStackNames(repoDir string, cfg *config.Config) (map[string]bool, error) {
+	discovered, err := stacks.Discover(repoDir, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("discovering stacks: %w", err)
+	}
+	names := make(map[string]bool, len(discovered))
+	for _, s := range discovered {
+		names[s.Name] = true
+	}
+	return names, nil
 }
 
 // toRelativePaths converts absolute file paths to paths relative to baseDir.

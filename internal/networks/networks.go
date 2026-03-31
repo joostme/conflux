@@ -39,37 +39,48 @@ type NetworkConfig struct {
 	IPAM       *IPAM             `yaml:"ipam"`
 }
 
+// Manager manages Docker network operations using a shared client.
+// Previously, Ensure() and Remove() each created their own dockerclient.Client
+// on every call. The Manager creates it once and reuses it.
+type Manager struct {
+	cli    *dockerclient.Client
+	logger *slog.Logger
+}
+
+// NewManager creates a new network Manager with a shared Docker client.
+func NewManager(logger *slog.Logger) (*Manager, error) {
+	cli, err := dockerclient.New(dockerclient.FromEnv)
+	if err != nil {
+		return nil, fmt.Errorf("creating docker client: %w", err)
+	}
+	return &Manager{cli: cli, logger: logger}, nil
+}
+
+// Close releases the underlying Docker client resources.
+func (m *Manager) Close() error {
+	return m.cli.Close()
+}
+
 // Ensure checks whether each configured network already exists on the Docker
 // host (matched by name). Networks that already exist are skipped with an
 // INFO log. Missing networks are created with the full set of options from
 // the config.
-func Ensure(ctx context.Context, networks map[string]NetworkConfig, logger *slog.Logger) error {
+func (m *Manager) Ensure(ctx context.Context, networks map[string]NetworkConfig) error {
 	if len(networks) == 0 {
 		return nil
 	}
 
-	cli, err := dockerclient.New(dockerclient.FromEnv)
-	if err != nil {
-		return fmt.Errorf("creating docker client: %w", err)
-	}
-	defer cli.Close()
-
 	// Build a set of existing network names for fast lookup.
-	existing, err := listExistingNames(ctx, cli)
+	existing, err := listExistingNames(ctx, m.cli)
 	if err != nil {
 		return fmt.Errorf("listing networks: %w", err)
 	}
 
 	for key, cfg := range networks {
-		// The effective name is either the explicit "name" field or the
-		// map key, exactly like docker compose does it.
-		name := cfg.Name
-		if name == "" {
-			name = key
-		}
+		name := ResolveName(key, cfg)
 
 		if existing[name] {
-			logger.Info("network already exists, skipping", "network", name)
+			m.logger.Info("network already exists, skipping", "network", name)
 			continue
 		}
 
@@ -78,16 +89,55 @@ func Ensure(ctx context.Context, networks map[string]NetworkConfig, logger *slog
 			return fmt.Errorf("building options for network %s: %w", name, err)
 		}
 
-		logger.Info("creating network", "network", name, "driver", opts.Driver)
-		resp, err := cli.NetworkCreate(ctx, name, opts)
+		m.logger.Info("creating network", "network", name, "driver", opts.Driver)
+		resp, err := m.cli.NetworkCreate(ctx, name, opts)
 		if err != nil {
 			return fmt.Errorf("creating network %s: %w", name, err)
 		}
 
-		logger.Info("network created", "network", name, "id", resp.ID[:12])
+		m.logger.Info("network created", "network", name, "id", resp.ID[:12])
 	}
 
 	return nil
+}
+
+// Remove removes the given networks from the Docker host. Networks that
+// don't exist are silently skipped. This only removes networks by the
+// exact names provided — it will never touch networks not in the list.
+func (m *Manager) Remove(ctx context.Context, names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+
+	for _, name := range names {
+		m.logger.Info("removing network", "network", name)
+		if _, err := m.cli.NetworkRemove(ctx, name, dockerclient.NetworkRemoveOptions{}); err != nil {
+			// Log but continue — the network might already be gone, or
+			// still in use by a container that hasn't been torn down yet.
+			m.logger.Error("failed to remove network", "network", name, "error", err)
+		}
+	}
+
+	return nil
+}
+
+// ResolveName returns the effective Docker network name for a config entry.
+// The effective name is either the explicit "name" field or the map key,
+// exactly like docker compose does it.
+func ResolveName(key string, cfg NetworkConfig) string {
+	if cfg.Name != "" {
+		return cfg.Name
+	}
+	return key
+}
+
+// ResolveNames returns the set of effective network names from a config map.
+func ResolveNames(networks map[string]NetworkConfig) map[string]bool {
+	names := make(map[string]bool, len(networks))
+	for key, cfg := range networks {
+		names[ResolveName(key, cfg)] = true
+	}
+	return names
 }
 
 // listExistingNames returns a set of all network names on the host.
