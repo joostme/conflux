@@ -99,133 +99,15 @@ func main() {
 		cancel()
 	}()
 
-	// Initial clone/pull and reconcile
-	logger.Info("performing initial sync")
-	freshClone, err := repo.CloneOrOpen()
-	if err != nil {
-		logger.Error("initial git sync failed", "error", err)
-		os.Exit(1)
+	// The Controller encapsulates the full git-poll → snapshot → diff → reconcile
+	// loop. Previously this logic was duplicated between the initial sync path
+	// and the recurring poll loop.
+	ctrl := NewController(repo, rec, logger)
+
+	if err := ctrl.InitialSync(ctx); err != nil {
+		logger.Error("initial sync failed", "error", err)
+		// Don't exit — keep polling, the repo might get fixed
 	}
 
-	if freshClone {
-		// Fresh clone — no prior state to compare against, just deploy everything
-		logger.Info("fresh clone, deploying all stacks")
-		if err := rec.Reconcile(ctx, nil, nil); err != nil {
-			logger.Error("initial reconciliation failed", "error", err)
-			// Don't exit — keep polling, the repo might get fixed
-		}
-	} else {
-		// Existing repo on disk — fetch and apply any pending changes
-		remoteHash, err := repo.Fetch()
-		if err != nil {
-			logger.Error("initial fetch failed", "error", err)
-			os.Exit(1)
-		}
-
-		if remoteHash != nil {
-			// There are pending changes — snapshot before, reset, then reconcile
-			before := snapshotState(rec, logger)
-
-			if err := repo.Reset(*remoteHash); err != nil {
-				logger.Error("initial reset failed", "error", err)
-				os.Exit(1)
-			}
-
-			after := snapshotState(rec, logger)
-			removedStacks := diffNames(before.stacks, after.stacks)
-			removedNetworks := diffNames(before.networks, after.networks)
-
-			if err := rec.Reconcile(ctx, removedStacks, removedNetworks); err != nil {
-				logger.Error("initial reconciliation failed", "error", err)
-			}
-		} else {
-			// No pending changes — just reconcile current state
-			if err := rec.Reconcile(ctx, nil, nil); err != nil {
-				logger.Error("initial reconciliation failed", "error", err)
-			}
-		}
-	}
-
-	// Main polling loop
-	ticker := time.NewTicker(cfg.PollInterval)
-	defer ticker.Stop()
-
-	logger.Info("entering poll loop", "interval", cfg.PollInterval)
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Info("conflux stopped")
-			return
-		case <-ticker.C:
-			// 1. Snapshot state from current worktree (before pull)
-			before := snapshotState(rec, logger)
-
-			// 2. Fetch remote changes
-			remoteHash, err := repo.Fetch()
-			if err != nil {
-				logger.Error("git fetch failed", "error", err)
-				continue
-			}
-			if remoteHash == nil {
-				continue // no changes
-			}
-
-			// 3. Reset worktree to new commit
-			if err := repo.Reset(*remoteHash); err != nil {
-				logger.Error("git reset failed", "error", err)
-				continue
-			}
-
-			// 4. Snapshot state from updated worktree (after pull)
-			after := snapshotState(rec, logger)
-
-			// 5. Compute removals and reconcile
-			removedStacks := diffNames(before.stacks, after.stacks)
-			removedNetworks := diffNames(before.networks, after.networks)
-
-			logger.Info("changes detected, reconciling",
-				"removed_stacks", len(removedStacks),
-				"removed_networks", len(removedNetworks),
-			)
-			if err := rec.Reconcile(ctx, removedStacks, removedNetworks); err != nil {
-				logger.Error("reconciliation failed", "error", err)
-			}
-		}
-	}
-}
-
-// repoState holds the discovered resource names from a worktree snapshot.
-// A nil field means discovery failed — the fail-safe in diffNames will
-// prevent any removals for that resource type.
-type repoState struct {
-	stacks   map[string]bool
-	networks map[string]bool
-}
-
-// snapshotState reads the current worktree and returns the set of managed
-// resource names via the reconciler's Snapshot() method, which loads config
-// only once for both stack and network discovery.
-func snapshotState(rec *reconciler.Reconciler, logger *slog.Logger) repoState {
-	stackNames, networkNames, err := rec.Snapshot()
-	if err != nil {
-		logger.Warn("failed to snapshot state, skipping removals", "error", err)
-		return repoState{}
-	}
-	return repoState{stacks: stackNames, networks: networkNames}
-}
-
-// diffNames returns names that are in "before" but not in "after".
-// Returns nil if either set is nil (fail-safe: don't remove anything when
-// we don't have complete information).
-func diffNames(before, after map[string]bool) []string {
-	if before == nil || after == nil {
-		return nil
-	}
-	var removed []string
-	for name := range before {
-		if !after[name] {
-			removed = append(removed, name)
-		}
-	}
-	return removed
+	ctrl.RunLoop(ctx, cfg.PollInterval)
 }

@@ -2,10 +2,12 @@ package networks
 
 import (
 	"testing"
+
+	"github.com/joostme/conflux/internal/config"
 )
 
 func TestResolveName_ExplicitName(t *testing.T) {
-	cfg := NetworkConfig{Name: "my-custom-net"}
+	cfg := config.NetworkConfig{Name: "my-custom-net"}
 	name := ResolveName("proxy", cfg)
 	if name != "my-custom-net" {
 		t.Errorf("ResolveName() = %q, want %q", name, "my-custom-net")
@@ -13,7 +15,7 @@ func TestResolveName_ExplicitName(t *testing.T) {
 }
 
 func TestResolveName_FallsBackToKey(t *testing.T) {
-	cfg := NetworkConfig{}
+	cfg := config.NetworkConfig{}
 	name := ResolveName("proxy", cfg)
 	if name != "proxy" {
 		t.Errorf("ResolveName() = %q, want %q", name, "proxy")
@@ -21,7 +23,7 @@ func TestResolveName_FallsBackToKey(t *testing.T) {
 }
 
 func TestResolveNames_MixedConfig(t *testing.T) {
-	networks := map[string]NetworkConfig{
+	networks := map[string]config.NetworkConfig{
 		"proxy":    {Name: "my-proxy"},
 		"internal": {},
 		"backend":  {Name: "custom-backend"},
@@ -48,7 +50,7 @@ func TestResolveNames_MixedConfig(t *testing.T) {
 }
 
 func TestResolveNames_EmptyMap(t *testing.T) {
-	names := ResolveNames(map[string]NetworkConfig{})
+	names := ResolveNames(map[string]config.NetworkConfig{})
 	if len(names) != 0 {
 		t.Errorf("expected 0 names, got %d", len(names))
 	}
@@ -62,9 +64,9 @@ func TestResolveNames_NilMap(t *testing.T) {
 }
 
 func TestConvertIPAM_ValidConfig(t *testing.T) {
-	src := &IPAM{
+	src := &config.IPAM{
 		Driver: "default",
-		Config: []IPAMPool{
+		Config: []config.IPAMPool{
 			{
 				Subnet:  "172.28.0.0/16",
 				IPRange: "172.28.5.0/24",
@@ -112,8 +114,8 @@ func TestConvertIPAM_ValidConfig(t *testing.T) {
 }
 
 func TestConvertIPAM_InvalidSubnet(t *testing.T) {
-	src := &IPAM{
-		Config: []IPAMPool{
+	src := &config.IPAM{
+		Config: []config.IPAMPool{
 			{Subnet: "not-a-cidr"},
 		},
 	}
@@ -124,8 +126,8 @@ func TestConvertIPAM_InvalidSubnet(t *testing.T) {
 }
 
 func TestConvertIPAM_InvalidGateway(t *testing.T) {
-	src := &IPAM{
-		Config: []IPAMPool{
+	src := &config.IPAM{
+		Config: []config.IPAMPool{
 			{
 				Subnet:  "172.28.0.0/16",
 				Gateway: "not-an-ip",
@@ -139,8 +141,8 @@ func TestConvertIPAM_InvalidGateway(t *testing.T) {
 }
 
 func TestConvertIPAM_InvalidIPRange(t *testing.T) {
-	src := &IPAM{
-		Config: []IPAMPool{
+	src := &config.IPAM{
+		Config: []config.IPAMPool{
 			{
 				Subnet:  "172.28.0.0/16",
 				IPRange: "garbage",
@@ -154,8 +156,8 @@ func TestConvertIPAM_InvalidIPRange(t *testing.T) {
 }
 
 func TestConvertIPAM_InvalidAuxAddress(t *testing.T) {
-	src := &IPAM{
-		Config: []IPAMPool{
+	src := &config.IPAM{
+		Config: []config.IPAMPool{
 			{
 				Subnet:       "172.28.0.0/16",
 				AuxAddresses: map[string]string{"bad": "not-an-ip"},
@@ -169,7 +171,7 @@ func TestConvertIPAM_InvalidAuxAddress(t *testing.T) {
 }
 
 func TestConvertIPAM_EmptyConfig(t *testing.T) {
-	src := &IPAM{
+	src := &config.IPAM{
 		Driver: "custom",
 	}
 	ipam, err := convertIPAM(src)
@@ -185,8 +187,8 @@ func TestConvertIPAM_EmptyConfig(t *testing.T) {
 }
 
 func TestConvertIPAM_SubnetOnly(t *testing.T) {
-	src := &IPAM{
-		Config: []IPAMPool{
+	src := &config.IPAM{
+		Config: []config.IPAMPool{
 			{Subnet: "10.0.0.0/8"},
 		},
 	}
@@ -210,8 +212,8 @@ func TestConvertIPAM_SubnetOnly(t *testing.T) {
 }
 
 func TestConvertIPAM_MultipleConfigs(t *testing.T) {
-	src := &IPAM{
-		Config: []IPAMPool{
+	src := &config.IPAM{
+		Config: []config.IPAMPool{
 			{Subnet: "10.0.0.0/8", Gateway: "10.0.0.1"},
 			{Subnet: "172.16.0.0/12", Gateway: "172.16.0.1"},
 		},
@@ -228,7 +230,7 @@ func TestConvertIPAM_MultipleConfigs(t *testing.T) {
 func TestBuildCreateOptions_AllFields(t *testing.T) {
 	enableIPv4 := true
 	enableIPv6 := false
-	cfg := NetworkConfig{
+	cfg := config.NetworkConfig{
 		Driver:     "bridge",
 		DriverOpts: map[string]string{"opt1": "val1"},
 		EnableIPv4: &enableIPv4,
@@ -236,9 +238,9 @@ func TestBuildCreateOptions_AllFields(t *testing.T) {
 		Internal:   true,
 		Attachable: true,
 		Labels:     map[string]string{"env": "test"},
-		IPAM: &IPAM{
+		IPAM: &config.IPAM{
 			Driver: "default",
-			Config: []IPAMPool{
+			Config: []config.IPAMPool{
 				{Subnet: "192.168.0.0/24"},
 			},
 		},
@@ -276,7 +278,7 @@ func TestBuildCreateOptions_AllFields(t *testing.T) {
 }
 
 func TestBuildCreateOptions_NilIPAM(t *testing.T) {
-	cfg := NetworkConfig{
+	cfg := config.NetworkConfig{
 		Driver: "bridge",
 	}
 
@@ -291,9 +293,9 @@ func TestBuildCreateOptions_NilIPAM(t *testing.T) {
 }
 
 func TestBuildCreateOptions_InvalidIPAM(t *testing.T) {
-	cfg := NetworkConfig{
-		IPAM: &IPAM{
-			Config: []IPAMPool{
+	cfg := config.NetworkConfig{
+		IPAM: &config.IPAM{
+			Config: []config.IPAMPool{
 				{Subnet: "invalid"},
 			},
 		},

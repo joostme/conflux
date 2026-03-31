@@ -6,38 +6,10 @@ import (
 	"log/slog"
 	"net/netip"
 
+	"github.com/joostme/conflux/internal/config"
 	dockernetwork "github.com/moby/moby/api/types/network"
 	dockerclient "github.com/moby/moby/client"
 )
-
-// IPAMPool mirrors docker compose IPAM config entries.
-type IPAMPool struct {
-	Subnet       string            `yaml:"subnet"`
-	IPRange      string            `yaml:"ip_range"`
-	Gateway      string            `yaml:"gateway"`
-	AuxAddresses map[string]string `yaml:"aux_addresses"`
-}
-
-// IPAM mirrors docker compose IPAM configuration.
-type IPAM struct {
-	Driver  string            `yaml:"driver"`
-	Config  []IPAMPool        `yaml:"config"`
-	Options map[string]string `yaml:"options"`
-}
-
-// NetworkConfig represents a single network definition in conflux.yaml.
-// The fields mirror the docker compose top-level network attributes.
-type NetworkConfig struct {
-	Name       string            `yaml:"name"`
-	Driver     string            `yaml:"driver"`
-	DriverOpts map[string]string `yaml:"driver_opts"`
-	EnableIPv4 *bool             `yaml:"enable_ipv4"`
-	EnableIPv6 *bool             `yaml:"enable_ipv6"`
-	Internal   bool              `yaml:"internal"`
-	Attachable bool              `yaml:"attachable"`
-	Labels     map[string]string `yaml:"labels"`
-	IPAM       *IPAM             `yaml:"ipam"`
-}
 
 // Manager manages Docker network operations using a shared client.
 // Previously, Ensure() and Remove() each created their own dockerclient.Client
@@ -65,7 +37,7 @@ func (m *Manager) Close() error {
 // host (matched by name). Networks that already exist are skipped with an
 // INFO log. Missing networks are created with the full set of options from
 // the config.
-func (m *Manager) Ensure(ctx context.Context, networks map[string]NetworkConfig) error {
+func (m *Manager) Ensure(ctx context.Context, networks map[string]config.NetworkConfig) error {
 	if len(networks) == 0 {
 		return nil
 	}
@@ -124,7 +96,7 @@ func (m *Manager) Remove(ctx context.Context, names []string) error {
 // ResolveName returns the effective Docker network name for a config entry.
 // The effective name is either the explicit "name" field or the map key,
 // exactly like docker compose does it.
-func ResolveName(key string, cfg NetworkConfig) string {
+func ResolveName(key string, cfg config.NetworkConfig) string {
 	if cfg.Name != "" {
 		return cfg.Name
 	}
@@ -132,7 +104,7 @@ func ResolveName(key string, cfg NetworkConfig) string {
 }
 
 // ResolveNames returns the set of effective network names from a config map.
-func ResolveNames(networks map[string]NetworkConfig) map[string]bool {
+func ResolveNames(networks map[string]config.NetworkConfig) map[string]bool {
 	names := make(map[string]bool, len(networks))
 	for key, cfg := range networks {
 		names[ResolveName(key, cfg)] = true
@@ -155,7 +127,7 @@ func listExistingNames(ctx context.Context, cli *dockerclient.Client) (map[strin
 
 // buildCreateOptions converts our config struct into the Docker SDK's
 // NetworkCreateOptions.
-func buildCreateOptions(cfg NetworkConfig) (dockerclient.NetworkCreateOptions, error) {
+func buildCreateOptions(cfg config.NetworkConfig) (dockerclient.NetworkCreateOptions, error) {
 	opts := dockerclient.NetworkCreateOptions{
 		Driver:     cfg.Driver,
 		Internal:   cfg.Internal,
@@ -178,7 +150,7 @@ func buildCreateOptions(cfg NetworkConfig) (dockerclient.NetworkCreateOptions, e
 }
 
 // convertIPAM turns our YAML-friendly IPAM struct into the Docker SDK type.
-func convertIPAM(src *IPAM) (*dockernetwork.IPAM, error) {
+func convertIPAM(src *config.IPAM) (*dockernetwork.IPAM, error) {
 	ipam := &dockernetwork.IPAM{
 		Driver:  src.Driver,
 		Options: src.Options,

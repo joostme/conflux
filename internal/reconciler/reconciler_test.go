@@ -75,8 +75,10 @@ stacks:
 	return repoDir
 }
 
-func TestDiscoverNetworkNames_Basic(t *testing.T) {
-	repoDir := setupRepoDirWithNetworks(t, nil, `
+// --- Snapshot tests (replaces separate DiscoverStackNames / DiscoverNetworkNames tests) ---
+
+func TestSnapshot_Basic(t *testing.T) {
+	repoDir := setupRepoDirWithNetworks(t, []string{"nginx", "redis", "whoami"}, `
 networks:
   proxy:
     driver: bridge
@@ -85,23 +87,34 @@ networks:
 `)
 
 	rec := New(repoDir, "conflux.yaml", nil, nil, nil, nil)
-	names, err := rec.DiscoverNetworkNames()
+	stackNames, networkNames, err := rec.Snapshot()
 	if err != nil {
-		t.Fatalf("DiscoverNetworkNames() error = %v", err)
+		t.Fatalf("Snapshot() error = %v", err)
 	}
 
-	if len(names) != 2 {
-		t.Fatalf("expected 2 networks, got %d", len(names))
+	// Verify stacks
+	if len(stackNames) != 3 {
+		t.Fatalf("expected 3 stacks, got %d", len(stackNames))
 	}
-	if !names["proxy"] {
-		t.Error("missing 'proxy'")
+	for _, expected := range []string{"nginx", "redis", "whoami"} {
+		if !stackNames[expected] {
+			t.Errorf("missing stack %q", expected)
+		}
 	}
-	if !names["internal"] {
-		t.Error("missing 'internal'")
+
+	// Verify networks
+	if len(networkNames) != 2 {
+		t.Fatalf("expected 2 networks, got %d", len(networkNames))
+	}
+	if !networkNames["proxy"] {
+		t.Error("missing network 'proxy'")
+	}
+	if !networkNames["internal"] {
+		t.Error("missing network 'internal'")
 	}
 }
 
-func TestDiscoverNetworkNames_ExplicitName(t *testing.T) {
+func TestSnapshot_ExplicitNetworkName(t *testing.T) {
 	repoDir := setupRepoDirWithNetworks(t, nil, `
 networks:
   proxy:
@@ -110,47 +123,105 @@ networks:
 `)
 
 	rec := New(repoDir, "conflux.yaml", nil, nil, nil, nil)
-	names, err := rec.DiscoverNetworkNames()
+	_, networkNames, err := rec.Snapshot()
 	if err != nil {
-		t.Fatalf("DiscoverNetworkNames() error = %v", err)
+		t.Fatalf("Snapshot() error = %v", err)
 	}
 
-	if len(names) != 1 {
-		t.Fatalf("expected 1 network, got %d", len(names))
+	if len(networkNames) != 1 {
+		t.Fatalf("expected 1 network, got %d", len(networkNames))
 	}
-	if !names["my-custom-proxy"] {
+	if !networkNames["my-custom-proxy"] {
 		t.Error("missing 'my-custom-proxy'")
 	}
-	if names["proxy"] {
+	if networkNames["proxy"] {
 		t.Error("'proxy' (map key) should not be in names")
 	}
 }
 
-func TestDiscoverNetworkNames_NoNetworks(t *testing.T) {
+func TestSnapshot_NoNetworks(t *testing.T) {
 	repoDir := setupRepoDir(t, "nginx")
 
 	rec := New(repoDir, "conflux.yaml", nil, nil, nil, nil)
-	names, err := rec.DiscoverNetworkNames()
+	stackNames, networkNames, err := rec.Snapshot()
 	if err != nil {
-		t.Fatalf("DiscoverNetworkNames() error = %v", err)
+		t.Fatalf("Snapshot() error = %v", err)
 	}
 
-	if len(names) != 0 {
-		t.Errorf("expected 0 networks, got %d", len(names))
+	if len(stackNames) != 1 {
+		t.Errorf("expected 1 stack, got %d", len(stackNames))
+	}
+	if len(networkNames) != 0 {
+		t.Errorf("expected 0 networks, got %d", len(networkNames))
 	}
 }
 
-func TestDiscoverNetworkNames_MissingConfig(t *testing.T) {
+func TestSnapshot_EmptyStacks(t *testing.T) {
+	repoDir := setupRepoDir(t) // no stacks
+
+	rec := New(repoDir, "conflux.yaml", nil, nil, nil, nil)
+	stackNames, _, err := rec.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+
+	if len(stackNames) != 0 {
+		t.Errorf("expected 0 stacks, got %d", len(stackNames))
+	}
+}
+
+func TestSnapshot_MissingConfig(t *testing.T) {
 	repoDir := t.TempDir()
 
 	rec := New(repoDir, "conflux.yaml", nil, nil, nil, nil)
-	_, err := rec.DiscoverNetworkNames()
+	_, _, err := rec.Snapshot()
 	if err == nil {
 		t.Fatal("expected error for missing config, got nil")
 	}
 }
 
-func TestDiscoverNetworkNames_AfterNetworkRemoval(t *testing.T) {
+func TestSnapshot_AfterStackRemoval(t *testing.T) {
+	repoDir := setupRepoDir(t, "nginx", "redis", "whoami")
+
+	rec := New(repoDir, "conflux.yaml", nil, nil, nil, nil)
+
+	// Take "before" snapshot
+	before, _, err := rec.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() before error = %v", err)
+	}
+	if len(before) != 3 {
+		t.Fatalf("expected 3 stacks before, got %d", len(before))
+	}
+
+	// Simulate git pull removing "whoami" stack
+	whoamiDir := filepath.Join(repoDir, "stacks", "whoami")
+	if err := os.RemoveAll(whoamiDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Take "after" snapshot
+	after, _, err := rec.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() after error = %v", err)
+	}
+	if len(after) != 2 {
+		t.Fatalf("expected 2 stacks after, got %d", len(after))
+	}
+
+	// Verify the diff
+	if !before["whoami"] {
+		t.Error("whoami should be in before set")
+	}
+	if after["whoami"] {
+		t.Error("whoami should NOT be in after set")
+	}
+	if !after["nginx"] || !after["redis"] {
+		t.Error("nginx and redis should still be in after set")
+	}
+}
+
+func TestSnapshot_AfterNetworkRemoval(t *testing.T) {
 	repoDir := setupRepoDirWithNetworks(t, []string{"nginx"}, `
 networks:
   proxy:
@@ -162,9 +233,9 @@ networks:
 	rec := New(repoDir, "conflux.yaml", nil, nil, nil, nil)
 
 	// Take "before" snapshot
-	beforeNetworks, err := rec.DiscoverNetworkNames()
+	_, beforeNetworks, err := rec.Snapshot()
 	if err != nil {
-		t.Fatalf("DiscoverNetworkNames() before error = %v", err)
+		t.Fatalf("Snapshot() before error = %v", err)
 	}
 	if len(beforeNetworks) != 2 {
 		t.Fatalf("expected 2 networks before, got %d", len(beforeNetworks))
@@ -184,9 +255,9 @@ networks:
 	}
 
 	// Take "after" snapshot
-	afterNetworks, err := rec.DiscoverNetworkNames()
+	_, afterNetworks, err := rec.Snapshot()
 	if err != nil {
-		t.Fatalf("DiscoverNetworkNames() after error = %v", err)
+		t.Fatalf("Snapshot() after error = %v", err)
 	}
 	if len(afterNetworks) != 1 {
 		t.Fatalf("expected 1 network after, got %d", len(afterNetworks))
@@ -201,89 +272,5 @@ networks:
 	}
 	if !afterNetworks["proxy"] {
 		t.Error("proxy should still be in after set")
-	}
-}
-
-func TestDiscoverStackNames_Basic(t *testing.T) {
-	repoDir := setupRepoDir(t, "nginx", "redis", "whoami")
-
-	rec := New(repoDir, "conflux.yaml", nil, nil, nil, nil)
-	names, err := rec.DiscoverStackNames()
-	if err != nil {
-		t.Fatalf("DiscoverStackNames() error = %v", err)
-	}
-
-	if len(names) != 3 {
-		t.Fatalf("expected 3 stacks, got %d", len(names))
-	}
-	for _, expected := range []string{"nginx", "redis", "whoami"} {
-		if !names[expected] {
-			t.Errorf("missing stack %q", expected)
-		}
-	}
-}
-
-func TestDiscoverStackNames_Empty(t *testing.T) {
-	repoDir := setupRepoDir(t) // no stacks
-
-	rec := New(repoDir, "conflux.yaml", nil, nil, nil, nil)
-	names, err := rec.DiscoverStackNames()
-	if err != nil {
-		t.Fatalf("DiscoverStackNames() error = %v", err)
-	}
-
-	if len(names) != 0 {
-		t.Errorf("expected 0 stacks, got %d", len(names))
-	}
-}
-
-func TestDiscoverStackNames_MissingConfig(t *testing.T) {
-	repoDir := t.TempDir() // no conflux.yaml
-
-	rec := New(repoDir, "conflux.yaml", nil, nil, nil, nil)
-	_, err := rec.DiscoverStackNames()
-	if err == nil {
-		t.Fatal("expected error for missing config, got nil")
-	}
-}
-
-func TestDiscoverStackNames_AfterStackRemoval(t *testing.T) {
-	repoDir := setupRepoDir(t, "nginx", "redis", "whoami")
-
-	rec := New(repoDir, "conflux.yaml", nil, nil, nil, nil)
-
-	// Take "before" snapshot
-	before, err := rec.DiscoverStackNames()
-	if err != nil {
-		t.Fatalf("DiscoverStackNames() before error = %v", err)
-	}
-	if len(before) != 3 {
-		t.Fatalf("expected 3 stacks before, got %d", len(before))
-	}
-
-	// Simulate git pull removing "whoami" stack
-	whoamiDir := filepath.Join(repoDir, "stacks", "whoami")
-	if err := os.RemoveAll(whoamiDir); err != nil {
-		t.Fatal(err)
-	}
-
-	// Take "after" snapshot
-	after, err := rec.DiscoverStackNames()
-	if err != nil {
-		t.Fatalf("DiscoverStackNames() after error = %v", err)
-	}
-	if len(after) != 2 {
-		t.Fatalf("expected 2 stacks after, got %d", len(after))
-	}
-
-	// Verify the diff
-	if !before["whoami"] {
-		t.Error("whoami should be in before set")
-	}
-	if after["whoami"] {
-		t.Error("whoami should NOT be in after set")
-	}
-	if !after["nginx"] || !after["redis"] {
-		t.Error("nginx and redis should still be in after set")
 	}
 }

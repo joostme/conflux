@@ -9,28 +9,46 @@ import (
 
 	"github.com/joostme/conflux/internal/config"
 	"github.com/joostme/conflux/internal/networks"
-	"github.com/joostme/conflux/internal/sops"
 	"github.com/joostme/conflux/internal/stacks"
 )
+
+// Decryptor decrypts SOPS-encrypted files and returns the plaintext content.
+type Decryptor interface {
+	Decrypt(srcPath string) ([]byte, error)
+}
+
+// ComposeService deploys and tears down Docker Compose stacks.
+type ComposeService interface {
+	Up(ctx context.Context, stack stacks.Stack, envFiles []string) error
+	Down(ctx context.Context, stackName string) error
+}
+
+// NetworkService manages Docker networks.
+type NetworkService interface {
+	Ensure(ctx context.Context, networks map[string]config.NetworkConfig) error
+	Remove(ctx context.Context, names []string) error
+}
 
 // Reconciler manages the reconciliation loop between git state and running stacks.
 type Reconciler struct {
 	repoDir    string
 	configFile string
-	decryptor  *sops.Decryptor
-	compose    *stacks.ComposeClient
-	networks   *networks.Manager
+	decryptor  Decryptor
+	compose    ComposeService
+	networks   NetworkService
 	logger     *slog.Logger
 }
 
-// New creates a new Reconciler.
-func New(repoDir, configFile string, decryptor *sops.Decryptor, compose *stacks.ComposeClient, networkMgr *networks.Manager, logger *slog.Logger) *Reconciler {
+// New creates a new Reconciler. Dependencies are accepted as interfaces to
+// allow testing with mocks — the concrete types (*sops.Decryptor,
+// *stacks.ComposeClient, *networks.Manager) satisfy these interfaces implicitly.
+func New(repoDir, configFile string, decryptor Decryptor, compose ComposeService, networkSvc NetworkService, logger *slog.Logger) *Reconciler {
 	return &Reconciler{
 		repoDir:    repoDir,
 		configFile: configFile,
 		decryptor:  decryptor,
 		compose:    compose,
-		networks:   networkMgr,
+		networks:   networkSvc,
 		logger:     logger,
 	}
 }
@@ -266,28 +284,6 @@ func (r *Reconciler) Snapshot() (stackNames map[string]bool, networkNames map[st
 
 	networkNames = networks.ResolveNames(cfg.Networks)
 	return stackNames, networkNames, nil
-}
-
-// DiscoverStackNames returns the set of stack names present in the current
-// worktree. This is a lightweight operation that only reads the filesystem
-// and config — it does not load compose projects or contact Docker.
-func (r *Reconciler) DiscoverStackNames() (map[string]bool, error) {
-	cfg, err := r.loadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("loading config: %w", err)
-	}
-	return discoverStackNames(r.repoDir, cfg)
-}
-
-// DiscoverNetworkNames returns the set of effective network names defined in
-// the current worktree's config. This resolves explicit "name" fields vs map
-// keys, matching the same logic that Ensure() uses.
-func (r *Reconciler) DiscoverNetworkNames() (map[string]bool, error) {
-	cfg, err := r.loadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("loading config: %w", err)
-	}
-	return networks.ResolveNames(cfg.Networks), nil
 }
 
 // discoverStackNames is the internal helper that works with an already-loaded config.
