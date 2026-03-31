@@ -8,19 +8,12 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o conflux .
 
 FROM alpine:3.20
 
-RUN apk add --no-cache \
-    age \
-    curl \
-    && SOPS_VERSION="3.9.4" \
-    && ARCH="$(uname -m)" \
-    && case "$ARCH" in \
-         x86_64)  SOPS_ARCH="amd64" ;; \
-         aarch64) SOPS_ARCH="arm64" ;; \
-         *)       echo "unsupported arch: $ARCH" && exit 1 ;; \
-       esac \
-    && curl -fsSL "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.${SOPS_ARCH}" \
-       -o /usr/local/bin/sops \
-    && chmod +x /usr/local/bin/sops \
+# All external tool dependencies have been eliminated:
+# - Git operations use go-git (pure Go) — no git CLI needed
+# - SOPS decryption uses getsops/sops/v3 library — no sops CLI needed
+# - Age key handling uses filippo.io/age library — no age CLI needed
+# Only ca-certificates is needed for TLS (git clone over SSH/HTTPS).
+RUN apk add --no-cache ca-certificates \
     && mkdir -p /data/repo /data/work
 
 COPY --from=builder /build/conflux /usr/local/bin/conflux
