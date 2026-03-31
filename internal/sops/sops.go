@@ -5,11 +5,10 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
-// Decryptor handles SOPS decryption of encrypted env files.
+// Decryptor handles SOPS decryption of encrypted files.
 type Decryptor struct {
 	ageKeyFile string
 	logger     *slog.Logger
@@ -23,16 +22,12 @@ func NewDecryptor(ageKeyFile string, logger *slog.Logger) *Decryptor {
 	}
 }
 
-// DecryptFile decrypts a SOPS-encrypted file and writes the output to destPath.
-// Any file referenced as a secret is assumed to be SOPS-encrypted. If decryption
-// fails, an error is returned — callers should not pre-check the filename.
-func (d *Decryptor) DecryptFile(srcPath, destPath string) error {
-	d.logger.Info("decrypting file", "src", srcPath, "dest", destPath)
-
-	// Ensure destination directory exists
-	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-		return fmt.Errorf("creating dest dir: %w", err)
-	}
+// Decrypt decrypts a SOPS-encrypted file and returns the plaintext content.
+// The decrypted data is held only in memory — nothing is written to disk.
+// Any file referenced as a secret is assumed to be SOPS-encrypted; if
+// decryption fails, a descriptive error is returned.
+func (d *Decryptor) Decrypt(srcPath string) ([]byte, error) {
+	d.logger.Info("decrypting file", "src", srcPath)
 
 	cmd := exec.Command("sops", "--decrypt", srcPath)
 	if d.ageKeyFile != "" {
@@ -41,27 +36,9 @@ func (d *Decryptor) DecryptFile(srcPath, destPath string) error {
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("sops decrypt %s: %s: %w", srcPath, strings.TrimSpace(string(out)), err)
+		return nil, fmt.Errorf("sops decrypt %s: %s: %w", srcPath, strings.TrimSpace(string(out)), err)
 	}
 
-	if err := os.WriteFile(destPath, out, 0600); err != nil {
-		return fmt.Errorf("writing decrypted file %s: %w", destPath, err)
-	}
-
-	d.logger.Debug("file decrypted successfully", "dest", destPath)
-	return nil
-}
-
-// DecryptedPath returns the destination path for a decrypted file.
-// The file is placed under workDir with its directory structure preserved
-// and a ".decrypted" suffix inserted before the file extension
-// (e.g., "secrets.env" → "secrets.decrypted.env").
-// If the file has no extension, ".decrypted" is appended.
-func DecryptedPath(workDir, relativePath string) string {
-	dir := filepath.Dir(relativePath)
-	base := filepath.Base(relativePath)
-	ext := filepath.Ext(base)
-	name := strings.TrimSuffix(base, ext)
-	decryptedBase := name + ".decrypted" + ext
-	return filepath.Join(workDir, dir, decryptedBase)
+	d.logger.Debug("file decrypted successfully", "src", srcPath)
+	return out, nil
 }

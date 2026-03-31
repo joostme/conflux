@@ -26,7 +26,6 @@ func main() {
 	pollInterval := parseDuration(getEnv("CONFLUX_POLL_INTERVAL", "30s"), logger)
 	ageKeyFile := getEnv("CONFLUX_SOPS_AGE_KEY", "")
 	repoDir := getEnv("CONFLUX_REPO_DIR", "/data/repo")
-	workDir := getEnv("CONFLUX_WORK_DIR", "/data/work")
 	configFile := getEnv("CONFLUX_CONFIG_FILE", "conflux.yaml")
 
 	logger.Info("conflux starting",
@@ -34,7 +33,6 @@ func main() {
 		"git_branch", gitBranch,
 		"poll_interval", pollInterval,
 		"repo_dir", repoDir,
-		"work_dir", workDir,
 		"config_file", configFile,
 	)
 
@@ -48,7 +46,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	rec := reconciler.New(repoDir, workDir, configFile, decryptor, composeClient, logger)
+	rec := reconciler.New(repoDir, configFile, decryptor, composeClient, logger)
 
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())

@@ -22,7 +22,7 @@ Conflux is a lightweight GitOps controller for Docker Compose. It polls a git re
 2. **Detect** — Compares local vs remote HEAD to detect changes
 3. **Parse** — Reads `conflux.yaml` from the repo root
 4. **Networks** — Ensures global Docker networks exist (skips existing ones)
-5. **Decrypt** — Decrypts secret files using SOPS with AGE keys
+5. **Decrypt** — Decrypts secret files in memory using SOPS with AGE keys
 6. **Discover** — Scans the stacks directory for compose files
 7. **Deploy** — Runs `docker compose up -d --remove-orphans` per stack
 8. **Cleanup** — Tears down stacks that were removed from the repo
@@ -39,7 +39,6 @@ Conflux is a lightweight GitOps controller for Docker Compose. It polls a git re
 | `CONFLUX_POLL_INTERVAL` | `30s` | How often to check for changes |
 | `CONFLUX_SOPS_AGE_KEY` | | Path to AGE key file for secret decryption |
 | `CONFLUX_REPO_DIR` | `/data/repo` | Where to clone the repository |
-| `CONFLUX_WORK_DIR` | `/data/work` | Working directory for decrypted files |
 | `CONFLUX_CONFIG_FILE` | `conflux.yaml` | Config filename in repo root |
 | `CONFLUX_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
