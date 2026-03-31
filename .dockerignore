@@ -1,0 +1,26 @@
+# Build artifacts
+conflux
+
+# Version control
+.git/
+.gitignore
+
+# Documentation
+README.md
+LICENSE
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Test output
+coverage.out
+coverage.html
+*_test.go
