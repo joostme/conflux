@@ -22,7 +22,7 @@ Conflux is a lightweight GitOps controller for Docker Compose. It polls a git re
 2. **Detect** — Compares local vs remote HEAD to detect changes
 3. **Parse** — Reads `conflux.yaml` from the repo root
 4. **Networks** — Ensures global Docker networks exist (skips existing ones)
-5. **Decrypt** — Decrypts any `.enc.env` files using SOPS with AGE keys
+5. **Decrypt** — Decrypts secret files using SOPS with AGE keys
 6. **Discover** — Scans the stacks directory for compose files
 7. **Deploy** — Runs `docker compose up -d --remove-orphans` per stack
 8. **Cleanup** — Tears down stacks that were removed from the repo
@@ -50,7 +50,7 @@ Place this in the root of your git repository:
 ```yaml
 global:
     secrets:
-        - secrets.enc.env       # SOPS-encrypted, decrypted at runtime
+        - secrets.env             # SOPS-encrypted, decrypted at runtime
     environment:
         - environment.env       # Plain-text env vars
 
@@ -69,7 +69,7 @@ networks:
 stacks:
     directory: stacks           # Where to find stack subdirectories
     file: compose.yaml          # Compose filename to look for in each stack
-    secrets: secrets.enc.env    # Default per-stack secrets filename
+    secrets: secrets.env        # Default per-stack secrets filename
     environment: environment.env # Default per-stack env filename
 ```
 
@@ -116,7 +116,7 @@ networks:
 my-infra-repo/
 ├── conflux.yaml            # Conflux configuration
 ├── environment.env         # Global env vars (applied to all stacks)
-├── secrets.enc.env         # Global secrets (SOPS-encrypted)
+├── secrets.env             # Global secrets (SOPS-encrypted)
 └── stacks/
     ├── whoami/
     │   └── compose.yaml
@@ -126,7 +126,7 @@ my-infra-repo/
     └── postgres/
         ├── compose.yaml
         ├── environment.env # Stack-level env (additive, overrides globals on conflict)
-        └── secrets.enc.env # Stack-level secrets (additive, highest priority)
+        └── secrets.env     # Stack-level secrets (additive, highest priority)
 ```
 
 ### Environment File Precedence
@@ -152,7 +152,7 @@ age-keygen -o age.key
 ### Encrypt a secrets file
 
 ```bash
-sops --encrypt --age age1xxxxxxxx secrets.env > secrets.enc.env
+sops --encrypt --age age1xxxxxxxx --in-place secrets.env
 ```
 
 ### Provide the key to Conflux

@@ -4,33 +4,6 @@ import (
 	"testing"
 )
 
-func TestIsEncrypted(t *testing.T) {
-	tests := []struct {
-		name     string
-		filename string
-		want     bool
-	}{
-		{"encrypted env file", "secrets.enc.env", true},
-		{"encrypted yaml file", "config.enc.yaml", true},
-		{"plain env file", "environment.env", false},
-		{"plain secrets file", "secrets.env", false},
-		{"no extension", "Dockerfile", false},
-		{"enc in directory not filename", "enc.dir/file.env", false},
-		{"multiple enc markers", "data.enc.enc.env", true},
-		{"enc at end", "file.enc.", true},
-		{"just enc", ".enc.", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := IsEncrypted(tt.filename)
-			if got != tt.want {
-				t.Errorf("IsEncrypted(%q) = %v, want %v", tt.filename, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestDecryptedPath(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -39,34 +12,46 @@ func TestDecryptedPath(t *testing.T) {
 		want         string
 	}{
 		{
-			name:         "simple encrypted env",
+			name:         "simple env file",
 			workDir:      "/work",
-			relativePath: "secrets.enc.env",
-			want:         "/work/secrets.env",
+			relativePath: "secrets.env",
+			want:         "/work/secrets.decrypted.env",
 		},
 		{
 			name:         "nested path",
 			workDir:      "/work",
-			relativePath: "stacks/nginx/secrets.enc.env",
-			want:         "/work/stacks/nginx/secrets.env",
+			relativePath: "stacks/nginx/secrets.env",
+			want:         "/work/stacks/nginx/secrets.decrypted.env",
 		},
 		{
-			name:         "no enc marker (still works, just no replacement)",
+			name:         "yaml file",
 			workDir:      "/work",
-			relativePath: "environment.env",
-			want:         "/work/environment.env",
+			relativePath: "config.yaml",
+			want:         "/work/config.decrypted.yaml",
 		},
 		{
 			name:         "different work dir",
 			workDir:      "/data/work",
-			relativePath: "secrets.enc.env",
-			want:         "/data/work/secrets.env",
+			relativePath: "secrets.env",
+			want:         "/data/work/secrets.decrypted.env",
 		},
 		{
 			name:         "deeply nested",
 			workDir:      "/work",
-			relativePath: "a/b/c/secrets.enc.yaml",
-			want:         "/work/a/b/c/secrets.yaml",
+			relativePath: "a/b/c/secrets.yaml",
+			want:         "/work/a/b/c/secrets.decrypted.yaml",
+		},
+		{
+			name:         "no extension",
+			workDir:      "/work",
+			relativePath: "secrets",
+			want:         "/work/secrets.decrypted",
+		},
+		{
+			name:         "legacy enc naming still works",
+			workDir:      "/work",
+			relativePath: "secrets.enc.env",
+			want:         "/work/secrets.enc.decrypted.env",
 		},
 	}
 

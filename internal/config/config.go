@@ -52,7 +52,7 @@ func Load(repoDir, configFile string) (*Config, error) {
 		cfg.Stacks.File = "compose.yaml"
 	}
 	if cfg.Stacks.Secrets == "" {
-		cfg.Stacks.Secrets = "secrets.enc.env"
+		cfg.Stacks.Secrets = "secrets.env"
 	}
 	if cfg.Stacks.Environment == "" {
 		cfg.Stacks.Environment = "environment.env"

@@ -24,7 +24,8 @@ func NewDecryptor(ageKeyFile string, logger *slog.Logger) *Decryptor {
 }
 
 // DecryptFile decrypts a SOPS-encrypted file and writes the output to destPath.
-// The source file should have ".enc." in the name (e.g., secrets.enc.env).
+// Any file referenced as a secret is assumed to be SOPS-encrypted. If decryption
+// fails, an error is returned — callers should not pre-check the filename.
 func (d *Decryptor) DecryptFile(srcPath, destPath string) error {
 	d.logger.Info("decrypting file", "src", srcPath, "dest", destPath)
 
@@ -52,16 +53,15 @@ func (d *Decryptor) DecryptFile(srcPath, destPath string) error {
 }
 
 // DecryptedPath returns the destination path for a decrypted file.
-// It replaces ".enc." with "." in the filename and places it under workDir.
-// The relativePath is preserved to maintain directory structure.
+// The file is placed under workDir with its directory structure preserved
+// and a ".decrypted" suffix inserted before the file extension
+// (e.g., "secrets.env" → "secrets.decrypted.env").
+// If the file has no extension, ".decrypted" is appended.
 func DecryptedPath(workDir, relativePath string) string {
 	dir := filepath.Dir(relativePath)
 	base := filepath.Base(relativePath)
-	decryptedBase := strings.Replace(base, ".enc.", ".", 1)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	decryptedBase := name + ".decrypted" + ext
 	return filepath.Join(workDir, dir, decryptedBase)
-}
-
-// IsEncrypted checks if a filename contains ".enc." indicating it's SOPS-encrypted.
-func IsEncrypted(filename string) bool {
-	return strings.Contains(filepath.Base(filename), ".enc.")
 }

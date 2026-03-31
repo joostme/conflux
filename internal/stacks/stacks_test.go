@@ -28,7 +28,7 @@ func defaultCfg() *config.Config {
 		Stacks: config.StacksConfig{
 			Directory:   "stacks",
 			File:        "compose.yaml",
-			Secrets:     "secrets.enc.env",
+			Secrets:     "secrets.env",
 			Environment: "environment.env",
 		},
 	}
@@ -78,7 +78,7 @@ func TestDiscover_WithEnvAndSecretFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	createStack(t, stacksDir, "app", "compose.yaml", "environment.env", "secrets.enc.env")
+	createStack(t, stacksDir, "app", "compose.yaml", "environment.env", "secrets.env")
 
 	stacks, err := Discover(repoDir, defaultCfg())
 	if err != nil {
@@ -101,7 +101,7 @@ func TestDiscover_WithEnvAndSecretFiles(t *testing.T) {
 	if len(app.SecretFiles) != 1 {
 		t.Fatalf("expected 1 secret file, got %d", len(app.SecretFiles))
 	}
-	expectedSecret := filepath.Join(stacksDir, "app", "secrets.enc.env")
+	expectedSecret := filepath.Join(stacksDir, "app", "secrets.env")
 	if app.SecretFiles[0] != expectedSecret {
 		t.Errorf("secret file = %q, want %q", app.SecretFiles[0], expectedSecret)
 	}
@@ -223,7 +223,7 @@ func TestDiscover_CustomConfig(t *testing.T) {
 		Stacks: config.StacksConfig{
 			Directory:   "apps",
 			File:        "docker-compose.yml",
-			Secrets:     "secrets.enc.env",
+			Secrets:     "secrets.env",
 			Environment: "vars.env",
 		},
 	}

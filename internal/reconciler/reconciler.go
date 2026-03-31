@@ -145,6 +145,7 @@ func (r *Reconciler) resolveGlobalEnvFiles(cfg *config.Config) ([]string, error)
 }
 
 // resolveGlobalSecretFiles decrypts global secret files and returns paths to decrypted versions.
+// All files referenced as secrets are assumed to be SOPS-encrypted and will be decrypted.
 func (r *Reconciler) resolveGlobalSecretFiles(cfg *config.Config) ([]string, error) {
 	var files []string
 	for _, f := range cfg.Global.Secrets {
@@ -154,15 +155,11 @@ func (r *Reconciler) resolveGlobalSecretFiles(cfg *config.Config) ([]string, err
 			continue
 		}
 
-		if sops.IsEncrypted(f) {
-			destPath := sops.DecryptedPath(r.workDir, f)
-			if err := r.decryptor.DecryptFile(srcPath, destPath); err != nil {
-				return nil, fmt.Errorf("decrypting global secret %s: %w", f, err)
-			}
-			files = append(files, destPath)
-		} else {
-			files = append(files, srcPath)
+		destPath := sops.DecryptedPath(r.workDir, f)
+		if err := r.decryptor.DecryptFile(srcPath, destPath); err != nil {
+			return nil, fmt.Errorf("decrypting global secret %s: %w", f, err)
 		}
+		files = append(files, destPath)
 	}
 	return files, nil
 }
@@ -195,15 +192,11 @@ func (r *Reconciler) deployStack(ctx context.Context, stack stacks.Stack, cfg *c
 	if len(stack.SecretFiles) > 0 {
 		r.logger.Debug("adding stack-level secrets", "stack", stack.Name)
 		for _, sf := range stack.SecretFiles {
-			if sops.IsEncrypted(filepath.Base(sf)) {
-				destPath := sops.DecryptedPath(r.workDir, filepath.Join(cfg.Stacks.Directory, stack.Name, filepath.Base(sf)))
-				if err := r.decryptor.DecryptFile(sf, destPath); err != nil {
-					return fmt.Errorf("decrypting stack secret %s: %w", sf, err)
-				}
-				envFiles = append(envFiles, destPath)
-			} else {
-				envFiles = append(envFiles, sf)
+			destPath := sops.DecryptedPath(r.workDir, filepath.Join(cfg.Stacks.Directory, stack.Name, filepath.Base(sf)))
+			if err := r.decryptor.DecryptFile(sf, destPath); err != nil {
+				return fmt.Errorf("decrypting stack secret %s: %w", sf, err)
 			}
+			envFiles = append(envFiles, destPath)
 		}
 	}
 

@@ -123,8 +123,8 @@ global:
 	if cfg.Stacks.File != "compose.yaml" {
 		t.Errorf("default file = %q, want %q", cfg.Stacks.File, "compose.yaml")
 	}
-	if cfg.Stacks.Secrets != "secrets.enc.env" {
-		t.Errorf("default secrets = %q, want %q", cfg.Stacks.Secrets, "secrets.enc.env")
+	if cfg.Stacks.Secrets != "secrets.env" {
+		t.Errorf("default secrets = %q, want %q", cfg.Stacks.Secrets, "secrets.env")
 	}
 	if cfg.Stacks.Environment != "environment.env" {
 		t.Errorf("default environment = %q, want %q", cfg.Stacks.Environment, "environment.env")
