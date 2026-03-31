@@ -1,0 +1,6 @@
+services:
+  whoami:
+    image: traefik/whoami
+    ports:
+      - "${WHOAMI_PORT:-8080}:80"
+    restart: unless-stopped

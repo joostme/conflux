@@ -1,0 +1,6 @@
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "${NGINX_PORT:-8081}:80"
+    restart: unless-stopped

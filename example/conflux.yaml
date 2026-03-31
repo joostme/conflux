@@ -1,0 +1,25 @@
+global:
+    secrets:
+        - secrets.enc.env
+    environment:
+        - environment.env
+
+networks:
+    proxy:
+        driver: bridge
+        attachable: true
+        labels:
+            com.example.description: "Reverse proxy network"
+    internal:
+        driver: bridge
+        internal: true
+        ipam:
+            config:
+                - subnet: 172.28.0.0/16
+                  gateway: 172.28.0.1
+
+stacks:
+    directory: stacks
+    file: compose.yaml
+    secrets: secrets.enc.env
+    environment: environment.env
