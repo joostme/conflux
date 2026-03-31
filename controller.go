@@ -10,8 +10,6 @@ import (
 )
 
 // Controller orchestrates the git-poll → snapshot → diff → reconcile loop.
-// It extracts the duplicated logic that was previously inlined in main() for
-// both the initial sync path and the recurring poll loop.
 type Controller struct {
 	repo   *git.Repo
 	rec    *reconciler.Reconciler
@@ -38,7 +36,6 @@ func (c *Controller) InitialSync(ctx context.Context) error {
 		return c.rec.Reconcile(ctx, nil, nil)
 	}
 
-	// Existing repo — fetch and apply any pending changes.
 	return c.fetchAndReconcile(ctx)
 }
 
@@ -61,37 +58,24 @@ func (c *Controller) RunLoop(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// fetchAndReconcile is the single implementation of the
-// snapshot → fetch → reset → snapshot → diff → reconcile sequence.
-// Previously this logic was duplicated between the initial-sync path
-// and the poll loop in main().
+// fetchAndReconcile snapshots state, fetches remote changes, and reconciles.
 func (c *Controller) fetchAndReconcile(ctx context.Context) error {
-	// 1. Snapshot state from current worktree (before pull)
 	before := c.snapshotState()
 
-	// 2. Fetch remote changes
 	remoteHash, err := c.repo.Fetch()
 	if err != nil {
 		return err
 	}
 	if remoteHash == nil {
-		// No changes — on initial sync this means current state is up-to-date,
-		// so we still reconcile to ensure all stacks are deployed.
-		if err := c.rec.Reconcile(ctx, nil, nil); err != nil {
-			return err
-		}
-		return nil
+		// No changes — still reconcile to ensure all stacks are running.
+		return c.rec.Reconcile(ctx, nil, nil)
 	}
 
-	// 3. Reset worktree to new commit
 	if err := c.repo.Reset(*remoteHash); err != nil {
 		return err
 	}
 
-	// 4. Snapshot state from updated worktree (after pull)
 	after := c.snapshotState()
-
-	// 5. Compute removals and reconcile
 	removedStacks := diffNames(before.stacks, after.stacks)
 	removedNetworks := diffNames(before.networks, after.networks)
 
@@ -102,17 +86,13 @@ func (c *Controller) fetchAndReconcile(ctx context.Context) error {
 	return c.rec.Reconcile(ctx, removedStacks, removedNetworks)
 }
 
-// repoState holds the discovered resource names from a worktree snapshot.
-// A nil field means discovery failed — the fail-safe in diffNames will
-// prevent any removals for that resource type.
+// repoState holds discovered resource names from a worktree snapshot.
 type repoState struct {
 	stacks   map[string]bool
 	networks map[string]bool
 }
 
-// snapshotState reads the current worktree and returns the set of managed
-// resource names via the reconciler's Snapshot() method, which loads config
-// only once for both stack and network discovery.
+// snapshotState reads the current worktree and returns managed resource names.
 func (c *Controller) snapshotState() repoState {
 	stackNames, networkNames, err := c.rec.Snapshot()
 	if err != nil {
@@ -122,9 +102,8 @@ func (c *Controller) snapshotState() repoState {
 	return repoState{stacks: stackNames, networks: networkNames}
 }
 
-// diffNames returns names that are in "before" but not in "after".
-// Returns nil if either set is nil (fail-safe: don't remove anything when
-// we don't have complete information).
+// diffNames returns names present in before but not in after.
+// Returns nil if either set is nil to avoid accidental removals.
 func diffNames(before, after map[string]bool) []string {
 	if before == nil || after == nil {
 		return nil

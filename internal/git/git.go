@@ -51,9 +51,7 @@ func (r *Repo) getAuth() (transport.AuthMethod, error) {
 		return nil, fmt.Errorf("loading SSH key %s: %w", r.sshKey, err)
 	}
 
-	// Accept any host key (equivalent to StrictHostKeyChecking=no).
-	// In a GitOps context the repo URL is configured by the operator,
-	// so TOFU-style host key checking adds no real security.
+	// Repo URL is operator-configured, so strict host key checking adds no value.
 	keys.HostKeyCallback = gossh.InsecureIgnoreHostKey()
 
 	r.auth = keys
@@ -71,13 +69,12 @@ func (r *Repo) remoteRefName() plumbing.ReferenceName {
 }
 
 // CloneOrOpen clones the repo if it doesn't exist, or opens an existing one.
-// Returns true if a fresh clone was performed (i.e. this is the first sync).
+// Returns true if a fresh clone was performed.
 func (r *Repo) CloneOrOpen() (bool, error) {
 	if r.repo != nil {
 		return false, nil
 	}
 
-	// Try to open an existing repo first
 	repo, err := gogit.PlainOpen(r.dir)
 	if err == nil {
 		r.repo = repo
@@ -88,7 +85,6 @@ func (r *Repo) CloneOrOpen() (bool, error) {
 		return false, fmt.Errorf("opening repo at %s: %w", r.dir, err)
 	}
 
-	// Not cloned yet — perform initial clone
 	if err := r.clone(); err != nil {
 		return false, err
 	}
@@ -111,14 +107,12 @@ func (r *Repo) Fetch() (*plumbing.Hash, error) {
 		return nil, err
 	}
 
-	// Get current HEAD hash before fetch
 	head, err := r.repo.Head()
 	if err != nil {
 		return nil, fmt.Errorf("getting HEAD: %w", err)
 	}
 	localHash := head.Hash()
 
-	// Fetch from remote
 	err = r.repo.Fetch(&gogit.FetchOptions{
 		RemoteName: "origin",
 		Auth:       auth,
@@ -128,7 +122,6 @@ func (r *Repo) Fetch() (*plumbing.Hash, error) {
 		return nil, fmt.Errorf("fetching: %w", err)
 	}
 
-	// Resolve remote tracking reference to get the latest remote commit
 	remoteRef, err := r.repo.Reference(r.remoteRefName(), true)
 	if err != nil {
 		return nil, fmt.Errorf("resolving remote ref %s: %w", r.remoteRefName(), err)
@@ -163,7 +156,6 @@ func (r *Repo) Reset(hash plumbing.Hash) error {
 		return fmt.Errorf("resetting to %s: %w", hash.String()[:12], err)
 	}
 
-	// Clean untracked files and directories
 	if err := wt.Clean(&gogit.CleanOptions{Dir: true}); err != nil {
 		return fmt.Errorf("cleaning worktree: %w", err)
 	}

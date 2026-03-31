@@ -18,8 +18,6 @@ import (
 )
 
 // appConfig holds all configuration loaded from environment variables.
-// Required fields, defaults, and duration parsing are handled declaratively
-// via struct tags — no manual getEnv/requireEnv/parseDuration needed.
 type appConfig struct {
 	GitURL       string        `env:"CONFLUX_GIT_URL,required"`
 	GitBranch    string        `env:"CONFLUX_GIT_BRANCH"       envDefault:"main"`
@@ -46,9 +44,6 @@ func (c appConfig) slogLevel() slog.Level {
 }
 
 func main() {
-	// Parse all configuration from environment variables in one step.
-	// Required fields, defaults, and type conversions (e.g. duration)
-	// are handled by the env library — no manual parsing needed.
 	cfg, err := env.ParseAs[appConfig]()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "configuration error: %v\n", err)
@@ -67,7 +62,6 @@ func main() {
 		"config_file", cfg.ConfigFile,
 	)
 
-	// Initialize components
 	repo := git.NewRepo(cfg.GitURL, cfg.GitBranch, cfg.RepoDir, cfg.GitKey, logger)
 	decryptor := sops.NewDecryptor(cfg.AgeKeyFile, logger)
 
@@ -99,9 +93,6 @@ func main() {
 		cancel()
 	}()
 
-	// The Controller encapsulates the full git-poll → snapshot → diff → reconcile
-	// loop. Previously this logic was duplicated between the initial sync path
-	// and the recurring poll loop.
 	ctrl := NewController(repo, rec, logger)
 
 	if err := ctrl.InitialSync(ctx); err != nil {

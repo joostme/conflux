@@ -12,8 +12,6 @@ import (
 )
 
 // Manager manages Docker network operations using a shared client.
-// Previously, Ensure() and Remove() each created their own dockerclient.Client
-// on every call. The Manager creates it once and reuses it.
 type Manager struct {
 	cli    *dockerclient.Client
 	logger *slog.Logger
@@ -33,16 +31,12 @@ func (m *Manager) Close() error {
 	return m.cli.Close()
 }
 
-// Ensure checks whether each configured network already exists on the Docker
-// host (matched by name). Networks that already exist are skipped with an
-// INFO log. Missing networks are created with the full set of options from
-// the config.
+// Ensure creates any configured networks that don't already exist.
 func (m *Manager) Ensure(ctx context.Context, networks map[string]config.NetworkConfig) error {
 	if len(networks) == 0 {
 		return nil
 	}
 
-	// Build a set of existing network names for fast lookup.
 	existing, err := listExistingNames(ctx, m.cli)
 	if err != nil {
 		return fmt.Errorf("listing networks: %w", err)
@@ -73,9 +67,7 @@ func (m *Manager) Ensure(ctx context.Context, networks map[string]config.Network
 	return nil
 }
 
-// Remove removes the given networks from the Docker host. Networks that
-// don't exist are silently skipped. This only removes networks by the
-// exact names provided — it will never touch networks not in the list.
+// Remove removes the given networks. Errors are logged but don't halt removal of remaining networks.
 func (m *Manager) Remove(ctx context.Context, names []string) error {
 	if len(names) == 0 {
 		return nil
@@ -84,8 +76,6 @@ func (m *Manager) Remove(ctx context.Context, names []string) error {
 	for _, name := range names {
 		m.logger.Info("removing network", "network", name)
 		if _, err := m.cli.NetworkRemove(ctx, name, dockerclient.NetworkRemoveOptions{}); err != nil {
-			// Log but continue — the network might already be gone, or
-			// still in use by a container that hasn't been torn down yet.
 			m.logger.Error("failed to remove network", "network", name, "error", err)
 		}
 	}
@@ -93,9 +83,7 @@ func (m *Manager) Remove(ctx context.Context, names []string) error {
 	return nil
 }
 
-// ResolveName returns the effective Docker network name for a config entry.
-// The effective name is either the explicit "name" field or the map key,
-// exactly like docker compose does it.
+// ResolveName returns the effective Docker network name: the explicit "name" field or the map key.
 func ResolveName(key string, cfg config.NetworkConfig) string {
 	if cfg.Name != "" {
 		return cfg.Name
@@ -125,8 +113,7 @@ func listExistingNames(ctx context.Context, cli *dockerclient.Client) (map[strin
 	return names, nil
 }
 
-// buildCreateOptions converts our config struct into the Docker SDK's
-// NetworkCreateOptions.
+// buildCreateOptions converts a NetworkConfig into Docker SDK options.
 func buildCreateOptions(cfg config.NetworkConfig) (dockerclient.NetworkCreateOptions, error) {
 	opts := dockerclient.NetworkCreateOptions{
 		Driver:     cfg.Driver,
@@ -149,7 +136,7 @@ func buildCreateOptions(cfg config.NetworkConfig) (dockerclient.NetworkCreateOpt
 	return opts, nil
 }
 
-// convertIPAM turns our YAML-friendly IPAM struct into the Docker SDK type.
+// convertIPAM converts a config IPAM struct into the Docker SDK type.
 func convertIPAM(src *config.IPAM) (*dockernetwork.IPAM, error) {
 	ipam := &dockernetwork.IPAM{
 		Driver:  src.Driver,

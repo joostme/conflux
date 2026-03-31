@@ -69,7 +69,6 @@ func Discover(repoDir string, cfg *config.Config) ([]Stack, error) {
 		stackDir := filepath.Join(stacksDir, entry.Name())
 		composeFile := filepath.Join(stackDir, cfg.Stacks.File)
 
-		// Only include directories that contain a compose file
 		if _, err := os.Stat(composeFile); os.IsNotExist(err) {
 			continue
 		}
@@ -80,13 +79,11 @@ func Discover(repoDir string, cfg *config.Config) ([]Stack, error) {
 			ComposeFile: composeFile,
 		}
 
-		// Check for stack-level environment file
 		envFile := filepath.Join(stackDir, cfg.Stacks.Environment)
 		if _, err := os.Stat(envFile); err == nil {
 			stack.EnvFiles = []string{envFile}
 		}
 
-		// Check for stack-level secrets file
 		secretsFile := filepath.Join(stackDir, cfg.Stacks.Secrets)
 		if _, err := os.Stat(secretsFile); err == nil {
 			stack.SecretFiles = []string{secretsFile}
