@@ -52,8 +52,9 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: cfg.slogLevel(),
 	}))
+	slog.SetDefault(logger)
 
-	logger.Info("conflux starting",
+	slog.Info("conflux starting",
 		"git_url", cfg.GitURL,
 		"git_branch", cfg.GitBranch,
 		"poll_interval", cfg.PollInterval,
@@ -61,31 +62,31 @@ func main() {
 		"config_file", cfg.ConfigFile,
 	)
 
-	repo := git.NewRepo(cfg.GitURL, cfg.GitBranch, cfg.RepoDir, cfg.GitKey, logger)
-	decryptor := sops.NewDecryptor(logger)
+	repo := git.NewRepo(cfg.GitURL, cfg.GitBranch, cfg.RepoDir, cfg.GitKey)
+	decryptor := sops.NewDecryptor()
 
-	composeClient, err := stacks.NewComposeClient(logger)
+	composeClient, err := stacks.NewComposeClient()
 	if err != nil {
-		logger.Error("failed to create compose client", "error", err)
+		slog.Error("failed to create compose client", "error", err)
 		os.Exit(1)
 	}
 
-	networkMgr, err := networks.NewManager(logger)
+	networkMgr, err := networks.NewManager()
 	if err != nil {
-		logger.Error("failed to create network manager", "error", err)
+		slog.Error("failed to create network manager", "error", err)
 		os.Exit(1)
 	}
 	defer networkMgr.Close()
 
-	rec := reconciler.New(cfg.RepoDir, cfg.ConfigFile, decryptor, composeClient, networkMgr, logger)
+	rec := reconciler.New(cfg.RepoDir, cfg.ConfigFile, decryptor, composeClient, networkMgr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	ctrl := NewController(repo, rec, logger)
+	ctrl := NewController(repo, rec)
 
 	if err := ctrl.InitialSync(ctx); err != nil {
-		logger.Error("initial sync failed", "error", err)
+		slog.Error("initial sync failed", "error", err)
 		// Don't exit — keep polling, the repo might get fixed
 	}
 

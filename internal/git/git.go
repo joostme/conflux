@@ -19,20 +19,18 @@ type Repo struct {
 	branch string
 	dir    string
 	sshKey string
-	logger *slog.Logger
 
 	repo *gogit.Repository
 	auth transport.AuthMethod
 }
 
 // NewRepo creates a new Repo instance.
-func NewRepo(url, branch, dir, sshKey string, logger *slog.Logger) *Repo {
+func NewRepo(url, branch, dir, sshKey string) *Repo {
 	return &Repo{
 		url:    url,
 		branch: branch,
 		dir:    dir,
 		sshKey: sshKey,
-		logger: logger,
 	}
 }
 
@@ -78,7 +76,7 @@ func (r *Repo) CloneOrOpen() (bool, error) {
 	repo, err := gogit.PlainOpen(r.dir)
 	if err == nil {
 		r.repo = repo
-		r.logger.Info("opened existing repository", "dir", r.dir)
+		slog.Info("opened existing repository", "dir", r.dir)
 		return false, nil
 	}
 	if !errors.Is(err, gogit.ErrRepositoryNotExists) {
@@ -100,7 +98,7 @@ func (r *Repo) IsCloned() bool {
 // Returns the remote commit hash if there are new changes, or nil if
 // the local branch is already up to date.
 func (r *Repo) Fetch() (*plumbing.Hash, error) {
-	r.logger.Debug("fetching remote changes")
+	slog.Debug("fetching remote changes")
 
 	auth, err := r.getAuth()
 	if err != nil {
@@ -129,11 +127,11 @@ func (r *Repo) Fetch() (*plumbing.Hash, error) {
 	remoteHash := remoteRef.Hash()
 
 	if localHash == remoteHash {
-		r.logger.Debug("no changes detected", "commit", localHash.String()[:12])
+		slog.Debug("no changes detected", "commit", localHash.String()[:12])
 		return nil, nil
 	}
 
-	r.logger.Info("changes detected",
+	slog.Info("changes detected",
 		"local", localHash.String()[:12],
 		"remote", remoteHash.String()[:12],
 	)
@@ -142,7 +140,7 @@ func (r *Repo) Fetch() (*plumbing.Hash, error) {
 
 // Reset hard-resets the worktree to the given commit and cleans untracked files.
 func (r *Repo) Reset(hash plumbing.Hash) error {
-	r.logger.Debug("resetting worktree", "commit", hash.String()[:12])
+	slog.Debug("resetting worktree", "commit", hash.String()[:12])
 
 	wt, err := r.repo.Worktree()
 	if err != nil {
@@ -160,13 +158,13 @@ func (r *Repo) Reset(hash plumbing.Hash) error {
 		return fmt.Errorf("cleaning worktree: %w", err)
 	}
 
-	r.logger.Info("repository updated", "commit", hash.String()[:12])
+	slog.Info("repository updated", "commit", hash.String()[:12])
 	return nil
 }
 
 // clone performs the initial git clone.
 func (r *Repo) clone() error {
-	r.logger.Info("cloning repository", "url", r.url, "branch", r.branch, "dir", r.dir)
+	slog.Info("cloning repository", "url", r.url, "branch", r.branch, "dir", r.dir)
 
 	auth, err := r.getAuth()
 	if err != nil {
@@ -186,6 +184,6 @@ func (r *Repo) clone() error {
 	}
 
 	r.repo = repo
-	r.logger.Info("repository cloned successfully")
+	slog.Info("repository cloned successfully")
 	return nil
 }

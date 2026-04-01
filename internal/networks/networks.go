@@ -13,17 +13,16 @@ import (
 
 // Manager manages Docker network operations using a shared client.
 type Manager struct {
-	cli    *dockerclient.Client
-	logger *slog.Logger
+	cli *dockerclient.Client
 }
 
 // NewManager creates a new network Manager with a shared Docker client.
-func NewManager(logger *slog.Logger) (*Manager, error) {
+func NewManager() (*Manager, error) {
 	cli, err := dockerclient.New(dockerclient.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("creating docker client: %w", err)
 	}
-	return &Manager{cli: cli, logger: logger}, nil
+	return &Manager{cli: cli}, nil
 }
 
 // Close releases the underlying Docker client resources.
@@ -46,7 +45,7 @@ func (m *Manager) Ensure(ctx context.Context, networks map[string]config.Network
 		name := ResolveName(key, cfg)
 
 		if existing[name] {
-			m.logger.Info("network already exists, skipping", "network", name)
+			slog.Info("network already exists, skipping", "network", name)
 			continue
 		}
 
@@ -55,13 +54,13 @@ func (m *Manager) Ensure(ctx context.Context, networks map[string]config.Network
 			return fmt.Errorf("building options for network %s: %w", name, err)
 		}
 
-		m.logger.Info("creating network", "network", name, "driver", opts.Driver)
+		slog.Info("creating network", "network", name, "driver", opts.Driver)
 		resp, err := m.cli.NetworkCreate(ctx, name, opts)
 		if err != nil {
 			return fmt.Errorf("creating network %s: %w", name, err)
 		}
 
-		m.logger.Info("network created", "network", name, "id", resp.ID[:12])
+		slog.Info("network created", "network", name, "id", resp.ID[:12])
 	}
 
 	return nil
@@ -74,9 +73,9 @@ func (m *Manager) Remove(ctx context.Context, names []string) error {
 	}
 
 	for _, name := range names {
-		m.logger.Info("removing network", "network", name)
+		slog.Info("removing network", "network", name)
 		if _, err := m.cli.NetworkRemove(ctx, name, dockerclient.NetworkRemoveOptions{}); err != nil {
-			m.logger.Error("failed to remove network", "network", name, "error", err)
+			slog.Error("failed to remove network", "network", name, "error", err)
 		}
 	}
 

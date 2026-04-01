@@ -26,11 +26,10 @@ type Stack struct {
 // ComposeClient wraps the docker compose SDK service.
 type ComposeClient struct {
 	service api.Compose
-	logger  *slog.Logger
 }
 
 // NewComposeClient creates a compose SDK client.
-func NewComposeClient(logger *slog.Logger) (*ComposeClient, error) {
+func NewComposeClient() (*ComposeClient, error) {
 	dockerCli, err := command.NewDockerCli()
 	if err != nil {
 		return nil, fmt.Errorf("creating docker CLI: %w", err)
@@ -47,7 +46,6 @@ func NewComposeClient(logger *slog.Logger) (*ComposeClient, error) {
 
 	return &ComposeClient{
 		service: service,
-		logger:  logger,
 	}, nil
 }
 
@@ -97,7 +95,7 @@ func Discover(repoDir string, cfg *config.Config) ([]Stack, error) {
 
 // Up loads the compose project and runs the equivalent of `docker compose up -d --remove-orphans`.
 func (c *ComposeClient) Up(ctx context.Context, stack Stack, envFiles []string) error {
-	c.logger.Info("deploying stack",
+	slog.Info("deploying stack",
 		"stack", stack.Name,
 		"compose", stack.ComposeFile,
 		"env_files", envFiles,
@@ -123,13 +121,13 @@ func (c *ComposeClient) Up(ctx context.Context, stack Stack, envFiles []string) 
 		return fmt.Errorf("compose up for %s: %w", stack.Name, err)
 	}
 
-	c.logger.Info("stack deployed successfully", "stack", stack.Name)
+	slog.Info("stack deployed successfully", "stack", stack.Name)
 	return nil
 }
 
 // Down runs the equivalent of `docker compose down --remove-orphans` for a project.
 func (c *ComposeClient) Down(ctx context.Context, stackName string) error {
-	c.logger.Info("removing stack", "stack", stackName)
+	slog.Info("removing stack", "stack", stackName)
 
 	err := c.service.Down(ctx, stackName, api.DownOptions{
 		RemoveOrphans: true,
@@ -138,6 +136,6 @@ func (c *ComposeClient) Down(ctx context.Context, stackName string) error {
 		return fmt.Errorf("compose down for %s: %w", stackName, err)
 	}
 
-	c.logger.Info("stack removed successfully", "stack", stackName)
+	slog.Info("stack removed successfully", "stack", stackName)
 	return nil
 }

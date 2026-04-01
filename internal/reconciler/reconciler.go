@@ -36,18 +36,16 @@ type Reconciler struct {
 	decryptor  Decryptor
 	compose    ComposeService
 	networks   NetworkService
-	logger     *slog.Logger
 }
 
 // New creates a new Reconciler.
-func New(repoDir, configFile string, decryptor Decryptor, compose ComposeService, networkSvc NetworkService, logger *slog.Logger) *Reconciler {
+func New(repoDir, configFile string, decryptor Decryptor, compose ComposeService, networkSvc NetworkService) *Reconciler {
 	return &Reconciler{
 		repoDir:    repoDir,
 		configFile: configFile,
 		decryptor:  decryptor,
 		compose:    compose,
 		networks:   networkSvc,
-		logger:     logger,
 	}
 }
 
@@ -61,17 +59,17 @@ func New(repoDir, configFile string, decryptor Decryptor, compose ComposeService
 // dependencies are respected. Context cancellation is checked between
 // each major phase and individual stack operation.
 func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetworks []string) error {
-	r.logger.Info("starting reconciliation")
+	slog.Info("starting reconciliation")
 
 	// Track temp files for cleanup
 	var tempFiles []string
 	defer func() {
 		for _, f := range tempFiles {
 			if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
-				r.logger.Warn("failed to remove temp secret file", "file", f, "error", err)
+				slog.Warn("failed to remove temp secret file", "file", f, "error", err)
 			}
 		}
-		r.logger.Debug("cleaned up decrypted secret temp files", "count", len(tempFiles))
+		slog.Debug("cleaned up decrypted secret temp files", "count", len(tempFiles))
 	}()
 
 	// 1. Parse config
@@ -79,7 +77,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
-	r.logger.Info("config loaded",
+	slog.Info("config loaded",
 		"stacks_dir", cfg.Stacks.Directory,
 		"global_env", cfg.Global.Environment,
 		"global_secrets", cfg.Global.Secrets,
@@ -91,7 +89,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		r.logger.Info("ensuring networks", "count", len(cfg.Networks))
+		slog.Info("ensuring networks", "count", len(cfg.Networks))
 		if err := r.networks.Ensure(ctx, cfg.Networks); err != nil {
 			return fmt.Errorf("ensuring networks: %w", err)
 		}
@@ -111,18 +109,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 	if err != nil {
 		return fmt.Errorf("discovering stacks: %w", err)
 	}
-	r.logger.Info("stacks discovered", "count", len(discovered))
+	slog.Info("stacks discovered", "count", len(discovered))
 
 	// 5. Deploy each stack
 	deployed := 0
 	for _, stack := range discovered {
 		if err := ctx.Err(); err != nil {
-			r.logger.Warn("reconciliation interrupted", "deployed", deployed, "remaining", len(discovered)-deployed)
+			slog.Warn("reconciliation interrupted", "deployed", deployed, "remaining", len(discovered)-deployed)
 			return err
 		}
 		stackTmpPaths, err := r.deployStack(ctx, stack, cfg, globalEnvFiles, globalSecretFiles)
 		if err != nil {
-			r.logger.Error("failed to deploy stack", "stack", stack.Name, "error", err)
+			slog.Error("failed to deploy stack", "stack", stack.Name, "error", err)
 			// Continue with other stacks
 			deployed++
 			continue
@@ -134,28 +132,28 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 	// 6. Remove deleted stacks
 	for _, name := range removedStacks {
 		if err := ctx.Err(); err != nil {
-			r.logger.Warn("reconciliation interrupted during stack removal")
+			slog.Warn("reconciliation interrupted during stack removal")
 			return err
 		}
-		r.logger.Info("stack removed from repo, tearing down", "stack", name)
+		slog.Info("stack removed from repo, tearing down", "stack", name)
 		if err := r.compose.Down(ctx, name); err != nil {
-			r.logger.Error("failed to remove stack", "stack", name, "error", err)
+			slog.Error("failed to remove stack", "stack", name, "error", err)
 		}
 	}
 
 	// 7. Remove deleted networks (after stacks so containers are torn down first)
 	if len(removedNetworks) > 0 {
 		if err := ctx.Err(); err != nil {
-			r.logger.Warn("reconciliation interrupted before network removal")
+			slog.Warn("reconciliation interrupted before network removal")
 			return err
 		}
-		r.logger.Info("removing networks", "count", len(removedNetworks))
+		slog.Info("removing networks", "count", len(removedNetworks))
 		if err := r.networks.Remove(ctx, removedNetworks); err != nil {
-			r.logger.Error("failed to remove networks", "error", err)
+			slog.Error("failed to remove networks", "error", err)
 		}
 	}
 
-	r.logger.Info("reconciliation complete",
+	slog.Info("reconciliation complete",
 		"deployed", deployed,
 		"removed_stacks", len(removedStacks),
 		"removed_networks", len(removedNetworks),
@@ -169,7 +167,7 @@ func (r *Reconciler) resolveGlobalEnvFiles(cfg *config.Config) []string {
 	for _, f := range cfg.Global.Environment {
 		absPath := filepath.Join(r.repoDir, f)
 		if _, err := os.Stat(absPath); os.IsNotExist(err) {
-			r.logger.Warn("global environment file not found, skipping", "file", f)
+			slog.Warn("global environment file not found, skipping", "file", f)
 			continue
 		}
 		files = append(files, absPath)
@@ -183,7 +181,7 @@ func (r *Reconciler) decryptSecretFiles(secrets []string, baseDir string) (tmpPa
 	for _, f := range secrets {
 		srcPath := filepath.Join(baseDir, f)
 		if _, statErr := os.Stat(srcPath); os.IsNotExist(statErr) {
-			r.logger.Warn("secret file not found, skipping", "file", f)
+			slog.Warn("secret file not found, skipping", "file", f)
 			continue
 		}
 
@@ -221,7 +219,7 @@ func (r *Reconciler) decryptSecretFiles(secrets []string, baseDir string) (tmpPa
 //  3. Stack-level environment files
 //  4. Stack-level secret files (decrypted)
 func (r *Reconciler) deployStack(ctx context.Context, stack stacks.Stack, cfg *config.Config, globalEnvFiles, globalSecretFiles []string) ([]string, error) {
-	r.logger.Info("processing stack", "stack", stack.Name)
+	slog.Info("processing stack", "stack", stack.Name)
 
 	var envFiles []string
 
@@ -230,14 +228,14 @@ func (r *Reconciler) deployStack(ctx context.Context, stack stacks.Stack, cfg *c
 
 	// Stack-level environment files
 	if len(stack.EnvFiles) > 0 {
-		r.logger.Debug("adding stack-level environment", "stack", stack.Name)
+		slog.Debug("adding stack-level environment", "stack", stack.Name)
 		envFiles = append(envFiles, stack.EnvFiles...)
 	}
 
 	// Stack-level secret files
 	var tempPaths []string
 	if len(stack.SecretFiles) > 0 {
-		r.logger.Debug("adding stack-level secrets", "stack", stack.Name)
+		slog.Debug("adding stack-level secrets", "stack", stack.Name)
 		stackSecretPaths, err := r.decryptSecretFiles(
 			toRelativePaths(stack.SecretFiles, stack.Dir),
 			stack.Dir,
