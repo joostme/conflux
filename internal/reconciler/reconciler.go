@@ -4,11 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 
-	"github.com/getsops/sops/v3/decrypt"
 	"github.com/joostme/conflux/internal/config"
+	envfiles "github.com/joostme/conflux/internal/env"
 	"github.com/joostme/conflux/internal/networks"
 	"github.com/joostme/conflux/internal/stacks"
 )
@@ -55,17 +53,6 @@ func New(repoDir, configFile string, compose ComposeService, networkSvc NetworkS
 func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetworks []string) error {
 	slog.Info("starting reconciliation")
 
-	// Track temp files for cleanup
-	var tempFiles []string
-	defer func() {
-		for _, f := range tempFiles {
-			if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
-				slog.Warn("failed to remove temp secret file", "file", f, "error", err)
-			}
-		}
-		slog.Debug("cleaned up decrypted secret temp files", "count", len(tempFiles))
-	}()
-
 	// 1. Parse config
 	cfg, err := r.loadConfig()
 	if err != nil {
@@ -78,6 +65,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 		"networks", len(cfg.Networks),
 	)
 
+	envResolver, err := envfiles.NewResolver(r.repoDir, cfg)
+	if err != nil {
+		return fmt.Errorf("resolving global env files: %w", err)
+	}
+	defer func() {
+		if err := envResolver.Cleanup(); err != nil {
+			slog.Warn("failed to clean up env temp files", "error", err)
+		}
+	}()
+
 	// 2. Ensure global networks exist before any stacks are deployed
 	if len(cfg.Networks) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -89,41 +86,31 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 		}
 	}
 
-	// 3. Process global env files (decrypt secrets, resolve paths)
-	globalEnvFiles := r.resolveGlobalEnvFiles(cfg)
-
-	globalSecretFiles, err := r.decryptSecretFiles(cfg.Global.Secrets, r.repoDir)
-	if err != nil {
-		return fmt.Errorf("resolving global secret files: %w", err)
-	}
-	tempFiles = append(tempFiles, globalSecretFiles...)
-
-	// 4. Discover stacks
+	// 3. Discover stacks
 	discovered, err := stacks.Discover(r.repoDir, cfg)
 	if err != nil {
 		return fmt.Errorf("discovering stacks: %w", err)
 	}
 	slog.Info("stacks discovered", "count", len(discovered))
 
-	// 5. Deploy each stack
+	// 4. Deploy each stack
 	deployed := 0
 	for _, stack := range discovered {
 		if err := ctx.Err(); err != nil {
 			slog.Warn("reconciliation interrupted", "deployed", deployed, "remaining", len(discovered)-deployed)
 			return err
 		}
-		stackTmpPaths, err := r.deployStack(ctx, stack, cfg, globalEnvFiles, globalSecretFiles)
+		err := r.deployStack(ctx, stack, cfg, envResolver)
 		if err != nil {
 			slog.Error("failed to deploy stack", "stack", stack.Name, "error", err)
 			// Continue with other stacks
 			deployed++
 			continue
 		}
-		tempFiles = append(tempFiles, stackTmpPaths...)
 		deployed++
 	}
 
-	// 6. Remove deleted stacks
+	// 5. Remove deleted stacks
 	for _, name := range removedStacks {
 		if err := ctx.Err(); err != nil {
 			slog.Warn("reconciliation interrupted during stack removal")
@@ -135,7 +122,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 		}
 	}
 
-	// 7. Remove deleted networks (after stacks so containers are torn down first)
+	// 6. Remove deleted networks (after stacks so containers are torn down first)
 	if len(removedNetworks) > 0 {
 		if err := ctx.Err(); err != nil {
 			slog.Warn("reconciliation interrupted before network removal")
@@ -155,96 +142,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 	return nil
 }
 
-// resolveGlobalEnvFiles returns absolute paths for global environment files, skipping missing ones.
-func (r *Reconciler) resolveGlobalEnvFiles(cfg *config.Config) []string {
-	var files []string
-	for _, f := range cfg.Global.Environment {
-		absPath := filepath.Join(r.repoDir, f)
-		if _, err := os.Stat(absPath); os.IsNotExist(err) {
-			slog.Warn("global environment file not found, skipping", "file", f)
-			continue
-		}
-		files = append(files, absPath)
-	}
-	return files
-}
-
-// decryptSecretFiles decrypts secret files and writes each to a temp file.
-// Returns temp file paths for use as env-file arguments and cleanup.
-func (r *Reconciler) decryptSecretFiles(secrets []string, baseDir string) (tmpPaths []string, err error) {
-	for _, f := range secrets {
-		srcPath := filepath.Join(baseDir, f)
-		if _, statErr := os.Stat(srcPath); os.IsNotExist(statErr) {
-			slog.Warn("secret file not found, skipping", "file", f)
-			continue
-		}
-
-		data, decErr := decrypt.File(srcPath, "")
-		if decErr != nil {
-			return tmpPaths, fmt.Errorf("decrypting secret %s: %w", f, decErr)
-		}
-
-		tmpFile, tmpErr := os.CreateTemp("", "conflux-secret-*.env")
-		if tmpErr != nil {
-			return tmpPaths, fmt.Errorf("creating temp file for %s: %w", f, tmpErr)
-		}
-
-		if _, writeErr := tmpFile.Write(data); writeErr != nil {
-			tmpFile.Close()
-			return tmpPaths, fmt.Errorf("writing temp file for %s: %w", f, writeErr)
-		}
-		tmpFile.Close()
-
-		if chmodErr := os.Chmod(tmpFile.Name(), 0600); chmodErr != nil {
-			return tmpPaths, fmt.Errorf("setting permissions on temp file for %s: %w", f, chmodErr)
-		}
-
-		tmpPaths = append(tmpPaths, tmpFile.Name())
-	}
-	return tmpPaths, nil
-}
-
-// deployStack builds the env file list and deploys a single stack.
-// Returns temp paths created for stack-level secrets.
-//
-// Env file priority (last --env-file wins in docker compose):
-//  1. Global environment files
-//  2. Global secret files (decrypted)
-//  3. Stack-level environment files
-//  4. Stack-level secret files (decrypted)
-func (r *Reconciler) deployStack(ctx context.Context, stack stacks.Stack, cfg *config.Config, globalEnvFiles, globalSecretFiles []string) ([]string, error) {
+// deployStack resolves env files and deploys a single stack.
+func (r *Reconciler) deployStack(ctx context.Context, stack stacks.Stack, cfg *config.Config, envResolver *envfiles.Resolver) error {
 	slog.Info("processing stack", "stack", stack.Name)
 
-	var envFiles []string
-
-	envFiles = append(envFiles, globalEnvFiles...)
-	envFiles = append(envFiles, globalSecretFiles...)
-
-	// Stack-level environment files
-	if len(stack.EnvFiles) > 0 {
-		slog.Debug("adding stack-level environment", "stack", stack.Name)
-		envFiles = append(envFiles, stack.EnvFiles...)
-	}
-
-	// Stack-level secret files
-	var tempPaths []string
-	if len(stack.SecretFiles) > 0 {
-		slog.Debug("adding stack-level secrets", "stack", stack.Name)
-		stackSecretPaths, err := r.decryptSecretFiles(
-			toRelativePaths(stack.SecretFiles, stack.Dir),
-			stack.Dir,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("decrypting stack secrets for %s: %w", stack.Name, err)
-		}
-		envFiles = append(envFiles, stackSecretPaths...)
-		tempPaths = stackSecretPaths
+	envFiles, err := envResolver.FilesForStack(stack.Dir, cfg.Stacks)
+	if err != nil {
+		return fmt.Errorf("resolving env files for %s: %w", stack.Name, err)
 	}
 
 	if err := r.compose.Up(ctx, stack, envFiles); err != nil {
-		return tempPaths, err
+		return err
 	}
-	return tempPaths, nil
+	return nil
 }
 
 // loadConfig loads and returns the parsed configuration.
@@ -279,18 +189,4 @@ func discoverStackNames(repoDir string, cfg *config.Config) (map[string]bool, er
 		names[s.Name] = true
 	}
 	return names, nil
-}
-
-// toRelativePaths converts absolute file paths to paths relative to baseDir.
-func toRelativePaths(absPaths []string, baseDir string) []string {
-	rel := make([]string, 0, len(absPaths))
-	for _, p := range absPaths {
-		r, err := filepath.Rel(baseDir, p)
-		if err != nil {
-			// Fall back to basename if Rel fails
-			r = filepath.Base(p)
-		}
-		rel = append(rel, r)
-	}
-	return rel
 }

@@ -88,22 +88,8 @@ func TestDiscover_WithEnvAndSecretFiles(t *testing.T) {
 	if len(stacks) != 1 {
 		t.Fatalf("expected 1 stack, got %d", len(stacks))
 	}
-
-	app := stacks[0]
-	if len(app.EnvFiles) != 1 {
-		t.Fatalf("expected 1 env file, got %d", len(app.EnvFiles))
-	}
-	expectedEnv := filepath.Join(stacksDir, "app", "environment.env")
-	if app.EnvFiles[0] != expectedEnv {
-		t.Errorf("env file = %q, want %q", app.EnvFiles[0], expectedEnv)
-	}
-
-	if len(app.SecretFiles) != 1 {
-		t.Fatalf("expected 1 secret file, got %d", len(app.SecretFiles))
-	}
-	expectedSecret := filepath.Join(stacksDir, "app", "secrets.env")
-	if app.SecretFiles[0] != expectedSecret {
-		t.Errorf("secret file = %q, want %q", app.SecretFiles[0], expectedSecret)
+	if stacks[0].Name != "app" {
+		t.Fatalf("stack name = %q, want %q", stacks[0].Name, "app")
 	}
 }
 
@@ -123,12 +109,6 @@ func TestDiscover_NoEnvFiles(t *testing.T) {
 
 	if len(stacks) != 1 {
 		t.Fatalf("expected 1 stack, got %d", len(stacks))
-	}
-	if len(stacks[0].EnvFiles) != 0 {
-		t.Errorf("expected 0 env files, got %d", len(stacks[0].EnvFiles))
-	}
-	if len(stacks[0].SecretFiles) != 0 {
-		t.Errorf("expected 0 secret files, got %d", len(stacks[0].SecretFiles))
 	}
 }
 
@@ -241,8 +221,5 @@ func TestDiscover_CustomConfig(t *testing.T) {
 	}
 	if stacks[0].ComposeFile != filepath.Join(stacksDir, "web", "docker-compose.yml") {
 		t.Errorf("compose file = %q", stacks[0].ComposeFile)
-	}
-	if len(stacks[0].EnvFiles) != 1 {
-		t.Fatalf("expected 1 env file, got %d", len(stacks[0].EnvFiles))
 	}
 }

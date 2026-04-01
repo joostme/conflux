@@ -13,8 +13,6 @@ type Stack struct {
 	Name        string
 	Dir         string // absolute path to stack directory
 	ComposeFile string // absolute path to compose file
-	EnvFiles    []string
-	SecretFiles []string
 }
 
 // Discover scans the stacks directory and returns all discovered stacks.
@@ -43,16 +41,6 @@ func Discover(repoDir string, cfg *config.Config) ([]Stack, error) {
 			Name:        entry.Name(),
 			Dir:         stackDir,
 			ComposeFile: composeFile,
-		}
-
-		envFile := filepath.Join(stackDir, cfg.Stacks.Environment)
-		if _, err := os.Stat(envFile); err == nil {
-			stack.EnvFiles = []string{envFile}
-		}
-
-		secretsFile := filepath.Join(stackDir, cfg.Stacks.Secrets)
-		if _, err := os.Stat(secretsFile); err == nil {
-			stack.SecretFiles = []string{secretsFile}
 		}
 
 		stacks = append(stacks, stack)
