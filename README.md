@@ -37,7 +37,7 @@ Conflux is a lightweight GitOps controller for Docker Compose. It polls a git re
 | `CONFLUX_GIT_BRANCH` | `main` | Branch to track |
 | `CONFLUX_GIT_KEY` | | Path to SSH private key for git auth |
 | `CONFLUX_POLL_INTERVAL` | `30s` | How often to check for changes |
-| `CONFLUX_SOPS_AGE_KEY` | | Path to AGE key file for secret decryption |
+| `SOPS_AGE_KEY_FILE` | | Path to AGE key file for secret decryption |
 | `CONFLUX_REPO_DIR` | `/data/repo` | Where to clone the repository |
 | `CONFLUX_CONFIG_FILE` | `conflux.yaml` | Config filename in repo root |
 | `CONFLUX_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
@@ -156,11 +156,11 @@ sops --encrypt --age age1xxxxxxxx --in-place secrets.env
 
 ### Provide the key to Conflux
 
-Mount the key file into the container and set `CONFLUX_SOPS_AGE_KEY`:
+Mount the key file into the container and set `SOPS_AGE_KEY_FILE`:
 
 ```bash
 docker run -v /path/to/age.key:/age.key:ro \
-  -e CONFLUX_SOPS_AGE_KEY=/age.key \
+  -e SOPS_AGE_KEY_FILE=/age.key \
   ...
 ```
 
@@ -179,7 +179,7 @@ docker run -d \
   -e CONFLUX_GIT_URL=git@github.com:yourorg/infra.git \
   -e CONFLUX_GIT_BRANCH=main \
   -e CONFLUX_GIT_KEY=/ssh.key \
-  -e CONFLUX_SOPS_AGE_KEY=/age.key \
+  -e SOPS_AGE_KEY_FILE=/age.key \
   -e CONFLUX_POLL_INTERVAL=60s \
   conflux
 ```
@@ -201,7 +201,7 @@ services:
       CONFLUX_GIT_URL: git@github.com:yourorg/infra.git
       CONFLUX_GIT_BRANCH: main
       CONFLUX_GIT_KEY: /ssh.key
-      CONFLUX_SOPS_AGE_KEY: /age.key
+      SOPS_AGE_KEY_FILE: /age.key
       CONFLUX_POLL_INTERVAL: 60s
 
 volumes:

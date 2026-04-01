@@ -23,7 +23,6 @@ type appConfig struct {
 	GitBranch    string        `env:"CONFLUX_GIT_BRANCH"       envDefault:"main"`
 	GitKey       string        `env:"CONFLUX_GIT_KEY"`
 	PollInterval time.Duration `env:"CONFLUX_POLL_INTERVAL"    envDefault:"30s"`
-	AgeKeyFile   string        `env:"CONFLUX_SOPS_AGE_KEY"`
 	RepoDir      string        `env:"CONFLUX_REPO_DIR"         envDefault:"/data/repo"`
 	ConfigFile   string        `env:"CONFLUX_CONFIG_FILE"      envDefault:"conflux.yaml"`
 	LogLevel     string        `env:"CONFLUX_LOG_LEVEL"        envDefault:"info"`
@@ -63,7 +62,7 @@ func main() {
 	)
 
 	repo := git.NewRepo(cfg.GitURL, cfg.GitBranch, cfg.RepoDir, cfg.GitKey, logger)
-	decryptor := sops.NewDecryptor(cfg.AgeKeyFile, logger)
+	decryptor := sops.NewDecryptor(logger)
 
 	composeClient, err := stacks.NewComposeClient(logger)
 	if err != nil {

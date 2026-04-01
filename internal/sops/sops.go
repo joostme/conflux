@@ -3,26 +3,20 @@ package sops
 import (
 	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/getsops/sops/v3/decrypt"
 )
 
 // Decryptor handles SOPS decryption of encrypted files.
 type Decryptor struct {
-	ageKeyFile string
-	logger     *slog.Logger
+	logger *slog.Logger
 }
 
-// NewDecryptor creates a SOPS decryptor. If ageKeyFile is set, configures
-// SOPS_AGE_KEY_FILE for age key discovery.
-func NewDecryptor(ageKeyFile string, logger *slog.Logger) *Decryptor {
-	if ageKeyFile != "" {
-		os.Setenv("SOPS_AGE_KEY_FILE", ageKeyFile)
-	}
+// NewDecryptor creates a SOPS decryptor. Age key discovery is handled by
+// the SOPS_AGE_KEY_FILE environment variable (set externally).
+func NewDecryptor(logger *slog.Logger) *Decryptor {
 	return &Decryptor{
-		ageKeyFile: ageKeyFile,
-		logger:     logger,
+		logger: logger,
 	}
 }
 
