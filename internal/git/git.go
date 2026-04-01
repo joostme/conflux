@@ -89,11 +89,6 @@ func (r *Repo) CloneOrOpen() (bool, error) {
 	return true, nil
 }
 
-// IsCloned returns true if the repository has been cloned or opened.
-func (r *Repo) IsCloned() bool {
-	return r.repo != nil
-}
-
 // Fetch downloads remote changes but does NOT update the worktree.
 // Returns the remote commit hash if there are new changes, or nil if
 // the local branch is already up to date.

@@ -15,11 +15,6 @@ type Controller struct {
 	rec  *reconciler.Reconciler
 }
 
-// NewController creates a new Controller.
-func NewController(repo *git.Repo, rec *reconciler.Reconciler) *Controller {
-	return &Controller{repo: repo, rec: rec}
-}
-
 // InitialSync performs the first-run synchronisation. On a fresh clone it
 // deploys everything; on an existing repo it fetches, diffs, and reconciles.
 func (c *Controller) InitialSync(ctx context.Context) error {

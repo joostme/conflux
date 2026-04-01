@@ -77,7 +77,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	ctrl := NewController(repo, rec)
+	ctrl := &Controller{repo: repo, rec: rec}
 
 	if err := ctrl.InitialSync(ctx); err != nil {
 		slog.Error("initial sync failed", "error", err)
