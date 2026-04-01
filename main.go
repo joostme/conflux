@@ -79,18 +79,8 @@ func main() {
 
 	rec := reconciler.New(cfg.RepoDir, cfg.ConfigFile, decryptor, composeClient, networkMgr, logger)
 
-	// Set up signal handling for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		sig := <-sigChan
-		logger.Info("received signal, shutting down", "signal", sig)
-		cancel()
-	}()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	ctrl := NewController(repo, rec, logger)
 
