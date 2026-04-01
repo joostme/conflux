@@ -13,7 +13,6 @@ import (
 	"github.com/joostme/conflux/internal/git"
 	"github.com/joostme/conflux/internal/networks"
 	"github.com/joostme/conflux/internal/reconciler"
-	"github.com/joostme/conflux/internal/sops"
 	"github.com/joostme/conflux/internal/stacks"
 )
 
@@ -22,7 +21,7 @@ type appConfig struct {
 	GitURL       string        `env:"CONFLUX_GIT_URL,required"`
 	GitBranch    string        `env:"CONFLUX_GIT_BRANCH"       envDefault:"main"`
 	GitKey       string        `env:"CONFLUX_GIT_KEY"`
-	PollInterval time.Duration `env:"CONFLUX_POLL_INTERVAL"    envDefault:"30s"`
+	PollInterval time.Duration `env:"CONFLUX_POLL_INTERVAL"    envDefault:"3600s"`
 	RepoDir      string        `env:"CONFLUX_REPO_DIR"         envDefault:"/data/repo"`
 	ConfigFile   string        `env:"CONFLUX_CONFIG_FILE"      envDefault:"conflux.yaml"`
 	LogLevel     string        `env:"CONFLUX_LOG_LEVEL"        envDefault:"info"`
@@ -63,7 +62,6 @@ func main() {
 	)
 
 	repo := git.NewRepo(cfg.GitURL, cfg.GitBranch, cfg.RepoDir, cfg.GitKey)
-	decryptor := sops.NewDecryptor()
 
 	composeClient, err := stacks.NewComposeClient()
 	if err != nil {
@@ -78,7 +76,7 @@ func main() {
 	}
 	defer networkMgr.Close()
 
-	rec := reconciler.New(cfg.RepoDir, cfg.ConfigFile, decryptor, composeClient, networkMgr)
+	rec := reconciler.New(cfg.RepoDir, cfg.ConfigFile, composeClient, networkMgr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

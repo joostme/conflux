@@ -7,15 +7,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/getsops/sops/v3/decrypt"
 	"github.com/joostme/conflux/internal/config"
 	"github.com/joostme/conflux/internal/networks"
 	"github.com/joostme/conflux/internal/stacks"
 )
-
-// Decryptor decrypts SOPS-encrypted files and returns the plaintext content.
-type Decryptor interface {
-	Decrypt(srcPath string) ([]byte, error)
-}
 
 // ComposeService deploys and tears down Docker Compose stacks.
 type ComposeService interface {
@@ -33,17 +29,15 @@ type NetworkService interface {
 type Reconciler struct {
 	repoDir    string
 	configFile string
-	decryptor  Decryptor
 	compose    ComposeService
 	networks   NetworkService
 }
 
 // New creates a new Reconciler.
-func New(repoDir, configFile string, decryptor Decryptor, compose ComposeService, networkSvc NetworkService) *Reconciler {
+func New(repoDir, configFile string, compose ComposeService, networkSvc NetworkService) *Reconciler {
 	return &Reconciler{
 		repoDir:    repoDir,
 		configFile: configFile,
-		decryptor:  decryptor,
 		compose:    compose,
 		networks:   networkSvc,
 	}
@@ -185,7 +179,7 @@ func (r *Reconciler) decryptSecretFiles(secrets []string, baseDir string) (tmpPa
 			continue
 		}
 
-		data, decErr := r.decryptor.Decrypt(srcPath)
+		data, decErr := decrypt.File(srcPath, "")
 		if decErr != nil {
 			return tmpPaths, fmt.Errorf("decrypting secret %s: %w", f, decErr)
 		}

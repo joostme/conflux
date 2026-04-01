@@ -159,7 +159,7 @@ func TestSnapshot_NoNetworks(t *testing.T) {
 func TestSnapshot_EmptyStacks(t *testing.T) {
 	repoDir := setupRepoDir(t) // no stacks
 
-	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil)
 	stackNames, _, err := rec.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
@@ -173,7 +173,7 @@ func TestSnapshot_EmptyStacks(t *testing.T) {
 func TestSnapshot_MissingConfig(t *testing.T) {
 	repoDir := t.TempDir()
 
-	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil)
 	_, _, err := rec.Snapshot()
 	if err == nil {
 		t.Fatal("expected error for missing config, got nil")
@@ -183,7 +183,7 @@ func TestSnapshot_MissingConfig(t *testing.T) {
 func TestSnapshot_AfterStackRemoval(t *testing.T) {
 	repoDir := setupRepoDir(t, "nginx", "redis", "whoami")
 
-	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil)
 
 	// Take "before" snapshot
 	before, _, err := rec.Snapshot()
@@ -230,7 +230,7 @@ networks:
     driver: bridge
 `)
 
-	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil)
 
 	// Take "before" snapshot
 	_, beforeNetworks, err := rec.Snapshot()
