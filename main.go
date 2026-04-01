@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/joostme/conflux/internal/docker"
 	"github.com/joostme/conflux/internal/git"
 	"github.com/joostme/conflux/internal/networks"
 	"github.com/joostme/conflux/internal/reconciler"
@@ -63,18 +64,20 @@ func main() {
 
 	repo := git.NewRepo(cfg.GitURL, cfg.GitBranch, cfg.RepoDir, cfg.GitKey)
 
-	composeClient, err := stacks.NewComposeClient()
+	dockerClient, err := docker.New()
+	if err != nil {
+		slog.Error("failed to create docker client", "error", err)
+		os.Exit(1)
+	}
+	defer dockerClient.Close()
+
+	composeClient, err := stacks.NewComposeClient(dockerClient.CLI())
 	if err != nil {
 		slog.Error("failed to create compose client", "error", err)
 		os.Exit(1)
 	}
 
-	networkMgr, err := networks.NewManager()
-	if err != nil {
-		slog.Error("failed to create network manager", "error", err)
-		os.Exit(1)
-	}
-	defer networkMgr.Close()
+	networkMgr := networks.NewManager(dockerClient.APIClient())
 
 	rec := reconciler.New(cfg.RepoDir, cfg.ConfigFile, composeClient, networkMgr)
 

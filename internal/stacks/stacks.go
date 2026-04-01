@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 
 	"github.com/docker/cli/cli/command"
-	"github.com/docker/cli/cli/flags"
 	"github.com/docker/compose/v5/pkg/api"
 	"github.com/docker/compose/v5/pkg/compose"
 	"github.com/joostme/conflux/internal/config"
@@ -28,17 +27,8 @@ type ComposeClient struct {
 	service api.Compose
 }
 
-// NewComposeClient creates a compose SDK client.
-func NewComposeClient() (*ComposeClient, error) {
-	dockerCli, err := command.NewDockerCli()
-	if err != nil {
-		return nil, fmt.Errorf("creating docker CLI: %w", err)
-	}
-
-	if err := dockerCli.Initialize(flags.NewClientOptions()); err != nil {
-		return nil, fmt.Errorf("initializing docker CLI: %w", err)
-	}
-
+// NewComposeClient creates a compose SDK client from an initialized Docker CLI.
+func NewComposeClient(dockerCli *command.DockerCli) (*ComposeClient, error) {
 	service, err := compose.NewComposeService(dockerCli)
 	if err != nil {
 		return nil, fmt.Errorf("creating compose service: %w", err)

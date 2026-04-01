@@ -13,21 +13,12 @@ import (
 
 // Manager manages Docker network operations using a shared client.
 type Manager struct {
-	cli *dockerclient.Client
+	cli dockerclient.APIClient
 }
 
-// NewManager creates a new network Manager with a shared Docker client.
-func NewManager() (*Manager, error) {
-	cli, err := dockerclient.New(dockerclient.FromEnv)
-	if err != nil {
-		return nil, fmt.Errorf("creating docker client: %w", err)
-	}
-	return &Manager{cli: cli}, nil
-}
-
-// Close releases the underlying Docker client resources.
-func (m *Manager) Close() error {
-	return m.cli.Close()
+// NewManager creates a new network Manager with an injected Docker API client.
+func NewManager(cli dockerclient.APIClient) *Manager {
+	return &Manager{cli: cli}
 }
 
 // Ensure creates any configured networks that don't already exist.
@@ -100,7 +91,7 @@ func ResolveNames(networks map[string]config.NetworkConfig) map[string]bool {
 }
 
 // listExistingNames returns a set of all network names on the host.
-func listExistingNames(ctx context.Context, cli *dockerclient.Client) (map[string]bool, error) {
+func listExistingNames(ctx context.Context, cli dockerclient.APIClient) (map[string]bool, error) {
 	result, err := cli.NetworkList(ctx, dockerclient.NetworkListOptions{})
 	if err != nil {
 		return nil, err
