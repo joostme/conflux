@@ -14,7 +14,6 @@ import (
 	"github.com/joostme/conflux/internal/git"
 	"github.com/joostme/conflux/internal/networks"
 	"github.com/joostme/conflux/internal/reconciler"
-	"github.com/joostme/conflux/internal/stacks"
 )
 
 // appConfig holds all configuration loaded from environment variables.
@@ -71,15 +70,9 @@ func main() {
 	}
 	defer dockerClient.Close()
 
-	composeClient, err := stacks.NewComposeClient(dockerClient.CLI())
-	if err != nil {
-		slog.Error("failed to create compose client", "error", err)
-		os.Exit(1)
-	}
-
 	networkMgr := networks.NewManager(dockerClient.APIClient())
 
-	rec := reconciler.New(cfg.RepoDir, cfg.ConfigFile, composeClient, networkMgr)
+	rec := reconciler.New(cfg.RepoDir, cfg.ConfigFile, dockerClient.Compose(), networkMgr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
