@@ -86,7 +86,7 @@ networks:
     driver: bridge
 `)
 
-	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil)
 	stackNames, networkNames, err := rec.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
@@ -122,7 +122,7 @@ networks:
     driver: bridge
 `)
 
-	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil)
 	_, networkNames, err := rec.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
@@ -142,7 +142,7 @@ networks:
 func TestSnapshot_NoNetworks(t *testing.T) {
 	repoDir := setupRepoDir(t, "nginx")
 
-	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil)
 	stackNames, networkNames, err := rec.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
