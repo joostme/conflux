@@ -81,12 +81,12 @@ func (r *Resolver) mergeAndExpand(contents [][]byte) (string, error) {
 
 	content, err := godotenv.Marshal(merged)
 	if err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return "", fmt.Errorf("marshaling resolved env: %w", err)
 	}
 
 	if _, err := tmp.WriteString(content + "\n"); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return "", fmt.Errorf("writing resolved env: %w", err)
 	}
 
