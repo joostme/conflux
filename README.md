@@ -1,5 +1,9 @@
 # Conflux
 
+<p align="center">
+  <img src="assets/logo.svg" alt="Conflux logo" width="320"/>
+</p>
+
 Docker Compose GitOps — auto-deploy compose stacks from a git repo.
 
 Conflux is a lightweight GitOps controller for Docker Compose. It polls a git repository, discovers compose stacks, decrypts secrets with SOPS+AGE, and runs `docker compose up -d` to keep your services in sync with your repo. Think of it as Flux CD for your homelab.
