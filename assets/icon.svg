@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Very light sky-blue background -->
+  <circle cx="100" cy="100" r="96" fill="#EBF6FC"/>
+  <circle cx="100" cy="100" r="96" fill="none" stroke="#C5E2F0" stroke-width="1.5"/>
+
+  <!--
+    Perfect interlocking triskelion of three C-shaped arcs.
+
+    Geometry proof: setting arc-center-distance = arc-radius = 40 guarantees that
+    the end-point of each arc lands exactly on the start-point of the next arc.
+
+    Arc centers (distance 40 from icon center at 0°/120°/240°):
+      C1: (100, 60)       C2: (134.64, 120)    C3: (65.36, 120)
+
+    Shared junction points (radius 40 from icon center):
+      P_top-left  = (65.36, 80)   — C1 start = C3 end
+      P_top-right = (134.64, 80)  — C1 end   = C2 start
+      P_bottom    = (100, 140)    — C2 end   = C3 start
+
+    Each arc is 240° CW (large-arc=1, sweep=1), gap faces icon center.
+  -->
+
+  <!-- C3: lower-left arm — drawn first (behind) -->
+  <path d="M 100,140 A 40,40 0 1 1 65.36,80"
+        fill="none" stroke="#B54A22" stroke-width="13" stroke-linecap="round"/>
+
+  <!-- C1: top arm -->
+  <path d="M 65.36,80 A 40,40 0 1 1 134.64,80"
+        fill="none" stroke="#E07838" stroke-width="13" stroke-linecap="round"/>
+
+  <!-- C2: lower-right arm — drawn last (in front) -->
+  <path d="M 134.64,80 A 40,40 0 1 1 100,140"
+        fill="none" stroke="#C95C2C" stroke-width="13" stroke-linecap="round"/>
+
+  <!-- Confluence: the central point where three streams meet -->
+  <circle cx="100" cy="100" r="7"   fill="#C95C2C"/>
+  <circle cx="100" cy="100" r="3"   fill="#EBF6FC"/>
+</svg>
