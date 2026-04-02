@@ -16,7 +16,7 @@ func TestMergeAndExpand_BasicExpansion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
-	defer r.Cleanup()
+	defer func() { _ = r.Cleanup() }()
 
 	got, err := godotenv.Read(resolved)
 	if err != nil {
@@ -40,7 +40,7 @@ func TestMergeAndExpand_LastWinsPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
-	defer r.Cleanup()
+	defer func() { _ = r.Cleanup() }()
 
 	got, err := godotenv.Read(resolved)
 	if err != nil {
@@ -61,7 +61,7 @@ func TestMergeAndExpand_ConcatenationWithSecret(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
-	defer r.Cleanup()
+	defer func() { _ = r.Cleanup() }()
 
 	got, err := godotenv.Read(resolved)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestMergeAndExpand_NoExpansionNeeded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
-	defer r.Cleanup()
+	defer func() { _ = r.Cleanup() }()
 
 	got, err := godotenv.Read(resolved)
 	if err != nil {
@@ -140,7 +140,7 @@ func TestMergeAndExpand_UndefinedVarExpandsToEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
-	defer r.Cleanup()
+	defer func() { _ = r.Cleanup() }()
 
 	got, err := godotenv.Read(resolved)
 	if err != nil {
@@ -161,7 +161,7 @@ func TestMergeAndExpand_MissingTrailingNewline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
-	defer r.Cleanup()
+	defer func() { _ = r.Cleanup() }()
 
 	got, err := godotenv.Read(resolved)
 	if err != nil {

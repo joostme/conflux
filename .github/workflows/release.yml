@@ -1,7 +1,11 @@
 name: Release
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
     branches:
       - main
 
@@ -14,6 +18,7 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
 
     steps:
@@ -21,6 +26,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -47,7 +53,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
 
       - name: Export release metadata
         if: steps.github_release.outputs.created == 'true'
