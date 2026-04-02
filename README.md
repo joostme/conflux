@@ -1,7 +1,7 @@
 # Conflux
 
 <p align="center">
-  <img src="assets/icon.svg" alt="Conflux Icon" width="320"/>
+  <img src="assets/icon.svg" alt="Conflux Icon" width="200"/>
 </p>
 
 Docker Compose GitOps — auto-deploy compose stacks from a git repo.
