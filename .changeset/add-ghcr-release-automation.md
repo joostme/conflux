@@ -2,6 +2,4 @@
 "conflux": minor
 ---
 
-Add GitHub Actions release automation for publishing the Conflux container image to GHCR.
-
-Releases now build and push multi-architecture images for `linux/amd64` and `linux/arm64`, and Changesets manages the changelog plus versioned release PR flow.
+Initial release of Conflux — a lightweight GitOps controller for Docker Compose that polls a git repo, decrypts SOPS+AGE secrets, and auto-deploys your compose stacks.
