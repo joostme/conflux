@@ -68,8 +68,10 @@ networks:
 stacks:
     directory: stacks           # Where to find stack subdirectories
     file: compose.yaml          # Compose filename to look for in each stack
-    secrets: secrets.env        # Default per-stack secrets filename
-    environment: environment.env # Default per-stack env filename
+    secrets:                    # Default per-stack secret filenames
+        - secrets.env
+    environment:                # Default per-stack env filenames
+        - environment.env
 ```
 
 ### Networks
@@ -128,16 +130,29 @@ my-infra-repo/
         └── secrets.env     # Stack-level secrets (additive, highest priority)
 ```
 
-### Environment File Precedence
+### Environment & Secret Handling
 
-For each stack, Conflux builds a list of `--env-file` arguments in this order (last wins):
+For each stack, Conflux collects all environment and secret files, decrypts secrets in memory with SOPS+AGE, and merges everything into a **single resolved env file**. Variables defined in later sources override earlier ones (last wins). The merged file also supports `${VAR}` substitution — any variable can reference a variable defined earlier in the merge order.
 
-1. **Global environment files** — always applied
-2. **Global secret files** — always applied, override global env on conflict
+**Merge order (last wins):**
+
+1. **Global environment files** — plain-text, always applied
+2. **Global secret files** — SOPS-encrypted, decrypted at runtime, override global env on conflict
 3. **Stack environment files** — if present, override globals on conflict
 4. **Stack secret files** — if present, highest priority
 
-Global files are **always** included. Stack-level files don't replace them — they're appended after, so they take priority for any overlapping variable names. Docker compose uses last-wins semantics for `--env-file`.
+**Variable substitution:**
+
+Variables can reference other variables using `${VAR}` syntax. References are resolved against all variables collected up to that point in the merge order. For example, a global secret can define `DB_PASSWORD=hunter2`, and a stack env file can use it:
+
+```env
+# stacks/myapp/environment.env
+DATABASE_URL=postgres://app:${DB_PASSWORD}@db:5432/mydb
+```
+
+Undefined references expand to an empty string.
+
+Global files are **always** included. Stack-level files don't replace them — they are merged after globals, so they take priority for any overlapping variable names. The single resolved file is passed as `--env-file` to `docker compose up`.
 
 ## SOPS + AGE Setup
 
@@ -229,5 +244,5 @@ Merge the generated changeset with your change. The release workflow will open a
 - **No complex reconciliation** — Just runs `docker compose up -d` and lets Docker handle whether containers need recreation. Simple and predictable.
 - **Git polling, not webhooks** — No need to expose ports or configure webhook endpoints. Works behind NATs and firewalls.
 - **Native git via go-git** — Uses [go-git](https://github.com/go-git/go-git) for all git operations (clone, fetch, reset). No git CLI dependency at runtime. SSH key auth is handled natively.
-- **Stack-level overrides are additive** — Global env/secret files are always applied to every stack. Stack-level files are appended after globals, so they override on conflict (last `--env-file` wins in docker compose).
+- **Stack-level overrides are additive** — Global env/secret files are always included. All sources are merged into a single resolved env file with `${VAR}` expansion and last-wins semantics.
 - **Errors don't cascade** — A failure in one stack doesn't prevent other stacks from deploying.
