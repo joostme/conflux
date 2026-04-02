@@ -30,7 +30,7 @@ func (c *Controller) InitialSync(ctx context.Context) error {
 		return c.rec.Reconcile(ctx, nil, nil)
 	}
 
-	return c.fetchAndReconcile(ctx)
+	return c.fetchAndReconcile(ctx, true)
 }
 
 // RunLoop enters the main polling loop and blocks until ctx is cancelled.
@@ -45,7 +45,7 @@ func (c *Controller) RunLoop(ctx context.Context, interval time.Duration) {
 			slog.Info("conflux stopped")
 			return
 		case <-ticker.C:
-			if err := c.fetchAndReconcile(ctx); err != nil {
+			if err := c.fetchAndReconcile(ctx, false); err != nil {
 				slog.Error("poll cycle failed", "error", err)
 			}
 		}
@@ -53,7 +53,11 @@ func (c *Controller) RunLoop(ctx context.Context, interval time.Duration) {
 }
 
 // fetchAndReconcile snapshots state, fetches remote changes, and reconciles.
-func (c *Controller) fetchAndReconcile(ctx context.Context) error {
+// When ensureRunning is true the controller reconciles even when the remote
+// has not changed, guaranteeing every stack is running (used on startup).
+// When ensureRunning is false, reconciliation is skipped if there are no
+// remote changes, avoiding unnecessary docker compose calls on every poll.
+func (c *Controller) fetchAndReconcile(ctx context.Context, ensureRunning bool) error {
 	before := c.snapshotState()
 
 	remoteHash, err := c.repo.Fetch()
@@ -61,7 +65,11 @@ func (c *Controller) fetchAndReconcile(ctx context.Context) error {
 		return err
 	}
 	if remoteHash == nil {
-		// No changes — still reconcile to ensure all stacks are running.
+		if !ensureRunning {
+			slog.Debug("no changes detected, skipping reconciliation")
+			return nil
+		}
+		slog.Info("no changes detected, reconciling to ensure all stacks are running")
 		return c.rec.Reconcile(ctx, nil, nil)
 	}
 
