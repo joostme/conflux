@@ -1,27 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 100" width="380" height="100">
   <!-- Icon: 200×200 source scaled to 80×80, placed at (10,10) -->
   <g transform="translate(10,10) scale(0.4)">
-    <!-- Light sky-blue background -->
-    <circle cx="100" cy="100" r="96" fill="#EAF7FD"/>
-    <circle cx="100" cy="100" r="96" fill="none" stroke="#BDE4F1" stroke-width="1.5"/>
+    <!-- Very light sky-blue background -->
+    <circle cx="100" cy="100" r="96" fill="#EBF6FC"/>
+    <circle cx="100" cy="100" r="96" fill="none" stroke="#C5E2F0" stroke-width="1.5"/>
 
-    <!-- C1: top — opening faces downward toward center -->
-    <path d="M 74,81 A 36,36 0 1 1 126,81"
-          fill="none" stroke="#6AC3DC" stroke-width="14" stroke-linecap="round" opacity="0.90"/>
+    <!-- Three C-arms of the triskelion — perfect endpoint alignment (d=r=40) -->
+    <!-- Junction points: (65.36,80), (134.64,80), (100,140) -->
 
-    <!-- C2: rotated 120° -->
-    <path d="M 74,81 A 36,36 0 1 1 126,81"
-          transform="rotate(120,100,100)"
-          fill="none" stroke="#85CEDF" stroke-width="14" stroke-linecap="round" opacity="0.85"/>
+    <!-- C3: lower-left arm (behind) -->
+    <path d="M 100,140 A 40,40 0 1 1 65.36,80"
+          fill="none" stroke="#B54A22" stroke-width="13" stroke-linecap="round"/>
 
-    <!-- C3: rotated 240° -->
-    <path d="M 74,81 A 36,36 0 1 1 126,81"
-          transform="rotate(240,100,100)"
-          fill="none" stroke="#A1D9E8" stroke-width="14" stroke-linecap="round" opacity="0.80"/>
+    <!-- C1: top arm -->
+    <path d="M 65.36,80 A 40,40 0 1 1 134.64,80"
+          fill="none" stroke="#E07838" stroke-width="13" stroke-linecap="round"/>
+
+    <!-- C2: lower-right arm (front) -->
+    <path d="M 134.64,80 A 40,40 0 1 1 100,140"
+          fill="none" stroke="#C95C2C" stroke-width="13" stroke-linecap="round"/>
 
     <!-- Confluence center point -->
-    <circle cx="100" cy="100" r="9"   fill="#47B3CC" opacity="0.88"/>
-    <circle cx="100" cy="100" r="3.5" fill="#D8F0F8"/>
+    <circle cx="100" cy="100" r="7" fill="#C95C2C"/>
+    <circle cx="100" cy="100" r="3" fill="#EBF6FC"/>
   </g>
 
   <!-- Wordmark -->
@@ -30,5 +31,5 @@
         font-size="50"
         font-weight="600"
         letter-spacing="1"
-        fill="#3EA8C0">conflux</text>
+        fill="#7A3018">conflux</text>
 </svg>
