@@ -20,7 +20,7 @@ type Resolver struct {
 }
 
 // NewResolver resolves global env/secret files upfront and returns a Resolver
-// that can produce per-stack env files via FilesForStack.
+// that can produce per-stack env files via FileForStack.
 func NewResolver(repoDir string, cfg *config.Config) (*Resolver, error) {
 	r := &Resolver{}
 
@@ -33,24 +33,20 @@ func NewResolver(repoDir string, cfg *config.Config) (*Resolver, error) {
 	return r, nil
 }
 
-// FilesForStack returns a single resolved env file path for a stack. All env
+// FileForStack returns a single resolved env file path for a stack. All env
 // and secret contents are collected in precedence order (global env, global
 // secrets, stack env, stack secrets), variable references like ${VAR} are
 // expanded, and the merged result is written to a single temporary file.
-func (r *Resolver) FilesForStack(stackDir string, stacks config.StacksConfig) ([]string, error) {
+func (r *Resolver) FileForStack(stackDir string, stacks config.StacksConfig) (string, error) {
 	contents := append([][]byte{}, r.globalContents...)
 
 	stackContents, err := resolveContents(stackDir, stacks.Environment, stacks.Secrets)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	contents = append(contents, stackContents...)
 
-	resolved, err := r.mergeAndExpand(contents)
-	if err != nil {
-		return nil, err
-	}
-	return []string{resolved}, nil
+	return r.mergeAndExpand(contents)
 }
 
 // mergeAndExpand concatenates all env content slices, parses them as a single

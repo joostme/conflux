@@ -91,13 +91,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 		}
 
 		slog.Info("processing stack", "stack", stack.Name)
-		envFiles, err := envResolver.FilesForStack(stack.Dir, cfg.Stacks)
+		envFile, err := envResolver.FileForStack(stack.Dir, cfg.Stacks)
 		if err != nil {
-			slog.Error("failed to resolve env files for stack", "stack", stack.Name, "error", err)
+			slog.Error("failed to resolve env file for stack", "stack", stack.Name, "error", err)
 			deployed++
 			continue
 		}
-		if err := r.compose.Up(ctx, stack, envFiles); err != nil {
+		if err := r.compose.Up(ctx, stack, []string{envFile}); err != nil {
 			slog.Error("failed to deploy stack", "stack", stack.Name, "error", err)
 			deployed++
 			continue
