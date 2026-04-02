@@ -104,10 +104,9 @@ func (r *Resolver) decryptToTemp(srcPath string) (string, error) {
 	}
 	r.tempFiles = append(r.tempFiles, f.Name())
 
-	_, writeErr := f.Write(data)
-	closeErr := f.Close()
-	if err := errors.Join(writeErr, closeErr); err != nil {
+	if _, err := f.Write(data); err != nil {
+		f.Close()
 		return "", err
 	}
-	return f.Name(), os.Chmod(f.Name(), 0600)
+	return f.Name(), f.Close()
 }
