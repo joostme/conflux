@@ -68,7 +68,7 @@ func main() {
 		slog.Error("failed to create docker client", "error", err)
 		os.Exit(1)
 	}
-	defer dockerClient.Close()
+	defer func() { _ = dockerClient.Close() }()
 
 	networkMgr := networks.NewManager(dockerClient.APIClient())
 
