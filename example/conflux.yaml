@@ -21,5 +21,7 @@ networks:
 stacks:
     directory: stacks
     file: compose.yaml
-    secrets: secrets.env
-    environment: environment.env
+    secrets:
+        - secrets.env
+    environment:
+        - environment.env

@@ -28,8 +28,8 @@ func defaultCfg() *config.Config {
 		Stacks: config.StacksConfig{
 			Directory:   "stacks",
 			File:        "compose.yaml",
-			Secrets:     "secrets.env",
-			Environment: "environment.env",
+			Secrets:     []string{"secrets.env"},
+			Environment: []string{"environment.env"},
 		},
 	}
 }
@@ -203,8 +203,8 @@ func TestDiscover_CustomConfig(t *testing.T) {
 		Stacks: config.StacksConfig{
 			Directory:   "apps",
 			File:        "docker-compose.yml",
-			Secrets:     "secrets.env",
-			Environment: "vars.env",
+			Secrets:     []string{"secrets.env"},
+			Environment: []string{"vars.env"},
 		},
 	}
 

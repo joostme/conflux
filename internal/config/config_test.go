@@ -31,8 +31,10 @@ networks:
 stacks:
   directory: apps
   file: docker-compose.yml
-  secrets: my-secrets.enc.env
-  environment: my-env.env
+  secrets:
+    - my-secrets.enc.env
+  environment:
+    - my-env.env
 `
 	if err := os.WriteFile(filepath.Join(dir, "conflux.yaml"), []byte(yaml), 0644); err != nil {
 		t.Fatal(err)
@@ -93,11 +95,11 @@ stacks:
 	if cfg.Stacks.File != "docker-compose.yml" {
 		t.Errorf("stacks.File = %q, want %q", cfg.Stacks.File, "docker-compose.yml")
 	}
-	if cfg.Stacks.Secrets != "my-secrets.enc.env" {
-		t.Errorf("stacks.Secrets = %q, want %q", cfg.Stacks.Secrets, "my-secrets.enc.env")
+	if len(cfg.Stacks.Secrets) != 1 || cfg.Stacks.Secrets[0] != "my-secrets.enc.env" {
+		t.Errorf("stacks.Secrets = %v, want [my-secrets.enc.env]", cfg.Stacks.Secrets)
 	}
-	if cfg.Stacks.Environment != "my-env.env" {
-		t.Errorf("stacks.Environment = %q, want %q", cfg.Stacks.Environment, "my-env.env")
+	if len(cfg.Stacks.Environment) != 1 || cfg.Stacks.Environment[0] != "my-env.env" {
+		t.Errorf("stacks.Environment = %v, want [my-env.env]", cfg.Stacks.Environment)
 	}
 }
 
@@ -123,11 +125,11 @@ global:
 	if cfg.Stacks.File != "compose.yaml" {
 		t.Errorf("default file = %q, want %q", cfg.Stacks.File, "compose.yaml")
 	}
-	if cfg.Stacks.Secrets != "secrets.env" {
-		t.Errorf("default secrets = %q, want %q", cfg.Stacks.Secrets, "secrets.env")
+	if len(cfg.Stacks.Secrets) != 1 || cfg.Stacks.Secrets[0] != "secrets.env" {
+		t.Errorf("default secrets = %v, want [secrets.env]", cfg.Stacks.Secrets)
 	}
-	if cfg.Stacks.Environment != "environment.env" {
-		t.Errorf("default environment = %q, want %q", cfg.Stacks.Environment, "environment.env")
+	if len(cfg.Stacks.Environment) != 1 || cfg.Stacks.Environment[0] != "environment.env" {
+		t.Errorf("default environment = %v, want [environment.env]", cfg.Stacks.Environment)
 	}
 }
 

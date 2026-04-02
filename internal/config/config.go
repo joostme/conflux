@@ -23,10 +23,10 @@ type GlobalConfig struct {
 
 // StacksConfig defines how stacks are discovered.
 type StacksConfig struct {
-	Directory   string `yaml:"directory"`
-	File        string `yaml:"file"`
-	Secrets     string `yaml:"secrets"`
-	Environment string `yaml:"environment"`
+	Directory   string   `yaml:"directory"`
+	File        string   `yaml:"file"`
+	Secrets     []string `yaml:"secrets"`
+	Environment []string `yaml:"environment"`
 }
 
 // NetworkConfig represents a single network definition in conflux.yaml.
@@ -79,11 +79,11 @@ func Load(repoDir, configFile string) (*Config, error) {
 	if cfg.Stacks.File == "" {
 		cfg.Stacks.File = "compose.yaml"
 	}
-	if cfg.Stacks.Secrets == "" {
-		cfg.Stacks.Secrets = "secrets.env"
+	if len(cfg.Stacks.Secrets) == 0 {
+		cfg.Stacks.Secrets = []string{"secrets.env"}
 	}
-	if cfg.Stacks.Environment == "" {
-		cfg.Stacks.Environment = "environment.env"
+	if len(cfg.Stacks.Environment) == 0 {
+		cfg.Stacks.Environment = []string{"environment.env"}
 	}
 
 	return cfg, nil

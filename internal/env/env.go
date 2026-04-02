@@ -22,26 +22,11 @@ type Resolver struct {
 func NewResolver(repoDir string, cfg *config.Config) (*Resolver, error) {
 	r := &Resolver{}
 
-	for _, name := range cfg.Global.Environment {
-		if p := findFile(repoDir, name); p != "" {
-			r.globalFiles = append(r.globalFiles, p)
-		} else {
-			slog.Warn("environment file not found, skipping", "file", name)
-		}
+	global, err := r.resolveFiles(repoDir, cfg.Global.Environment, cfg.Global.Secrets)
+	if err != nil {
+		return nil, err
 	}
-
-	for _, name := range cfg.Global.Secrets {
-		p := findFile(repoDir, name)
-		if p == "" {
-			slog.Warn("secret file not found, skipping", "file", name)
-			continue
-		}
-		tmp, err := r.decryptToTemp(p)
-		if err != nil {
-			return nil, err
-		}
-		r.globalFiles = append(r.globalFiles, tmp)
-	}
+	r.globalFiles = global
 
 	return r, nil
 }
@@ -51,11 +36,33 @@ func NewResolver(repoDir string, cfg *config.Config) (*Resolver, error) {
 func (r *Resolver) FilesForStack(stackDir string, stacks config.StacksConfig) ([]string, error) {
 	files := append([]string{}, r.globalFiles...)
 
-	if p := findFile(stackDir, stacks.Environment); p != "" {
-		files = append(files, p)
+	stackFiles, err := r.resolveFiles(stackDir, stacks.Environment, stacks.Secrets)
+	if err != nil {
+		return nil, err
 	}
 
-	if p := findFile(stackDir, stacks.Secrets); p != "" {
+	return append(files, stackFiles...), nil
+}
+
+// resolveFiles looks up environment and secret files under baseDir, decrypting
+// secrets into temporary files. Files are returned in order: env then secrets.
+func (r *Resolver) resolveFiles(baseDir string, environment, secrets []string) ([]string, error) {
+	var files []string
+
+	for _, name := range environment {
+		if p := findFile(baseDir, name); p != "" {
+			files = append(files, p)
+		} else {
+			slog.Warn("environment file not found, skipping", "file", name)
+		}
+	}
+
+	for _, name := range secrets {
+		p := findFile(baseDir, name)
+		if p == "" {
+			slog.Warn("secret file not found, skipping", "file", name)
+			continue
+		}
 		tmp, err := r.decryptToTemp(p)
 		if err != nil {
 			return nil, err
