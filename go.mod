@@ -8,6 +8,7 @@ require (
 	github.com/docker/compose/v5 v5.1.1
 	github.com/getsops/sops/v3 v3.12.2
 	github.com/go-git/go-git/v5 v5.17.0
+	github.com/joho/godotenv v1.5.1
 	github.com/moby/moby/api v1.54.0
 	github.com/moby/moby/client v0.3.0
 	golang.org/x/crypto v0.48.0
