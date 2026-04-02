@@ -208,6 +208,22 @@ volumes:
   conflux-data:
 ```
 
+## Releases
+
+Container images are published to GHCR from GitHub Actions for `linux/amd64` and `linux/arm64`.
+
+Changesets manages the changelog and release versioning:
+
+```bash
+npx changeset
+```
+
+Merge the generated changeset with your change. The release workflow will open a release PR that updates `package.json` and `CHANGELOG.md`, and merging that PR publishes a tagged GitHub release plus these image tags:
+
+- `ghcr.io/joostme/conflux:vX.Y.Z`
+- `ghcr.io/joostme/conflux:vX.Y`
+- `ghcr.io/joostme/conflux:latest`
+
 ## Design Decisions
 
 - **No complex reconciliation** — Just runs `docker compose up -d` and lets Docker handle whether containers need recreation. Simple and predictable.

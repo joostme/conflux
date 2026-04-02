@@ -24,3 +24,10 @@ Thumbs.db
 coverage.out
 coverage.html
 *_test.go
+
+# Node release tooling
+node_modules/
+package.json
+package-lock.json
+.changeset/
+scripts/
