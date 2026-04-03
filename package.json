@@ -5,7 +5,6 @@
   "description": "Release metadata and automation config for the Conflux image",
   "scripts": {
     "changeset": "changeset",
-    "prepare": "lefthook install",
     "version-packages": "changeset version",
     "release": "node scripts/create-github-release.mjs"
   },
