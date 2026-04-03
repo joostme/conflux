@@ -40,7 +40,7 @@ Conflux is a lightweight GitOps controller for Docker Compose. It polls a git re
 | `CONFLUX_GIT_URL` | *(required)* | Git repository URL |
 | `CONFLUX_GIT_BRANCH` | `main` | Branch to track |
 | `CONFLUX_GIT_KEY` | | Path to SSH private key for git auth |
-| `CONFLUX_POLL_INTERVAL` | `30s` | How often to check for changes |
+| `CONFLUX_POLL_INTERVAL` | `3600s` | How often to check for changes |
 | `SOPS_AGE_KEY_FILE` | | Path to AGE key file for secret decryption |
 | `CONFLUX_REPO_DIR` | `/data/repo` | Where to clone the repository |
 | `CONFLUX_CONFIG_FILE` | `conflux.yaml` | Config filename in repo root |
@@ -72,6 +72,7 @@ networks:
 stacks:
     directory: stacks           # Where to find stack subdirectories
     file: compose.yaml          # Compose filename to look for in each stack
+    parallel_deploy: 1          # Number of stacks to deploy concurrently
     secrets:                    # Default per-stack secret filenames
         - secrets.env
     environment:                # Default per-stack env filenames

@@ -21,6 +21,7 @@ networks:
 stacks:
     directory: stacks
     file: compose.yaml
+    parallel_deploy: 1
     secrets:
         - secrets.env
     environment:
