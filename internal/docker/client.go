@@ -54,18 +54,18 @@ type ComposeClient struct {
 }
 
 // Up loads the compose project and runs the equivalent of `docker compose up -d --remove-orphans`.
-func (c *ComposeClient) Up(ctx context.Context, stack stacks.Stack, envFiles []string) error {
+func (c *ComposeClient) Up(ctx context.Context, stack stacks.Stack, envFile string) error {
 	slog.Info("deploying stack",
 		"stack", stack.Name,
 		"compose", stack.ComposeFile,
-		"env_files", envFiles,
+		"env_file", envFile,
 	)
 
 	project, err := c.service.LoadProject(ctx, api.ProjectLoadOptions{
 		ProjectName: stack.Name,
 		ConfigPaths: []string{stack.ComposeFile},
 		WorkingDir:  stack.Dir,
-		EnvFiles:    envFiles,
+		EnvFiles:    []string{envFile},
 	})
 	if err != nil {
 		return fmt.Errorf("loading project %s: %w", stack.Name, err)

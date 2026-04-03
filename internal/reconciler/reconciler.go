@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/joostme/conflux/internal/config"
 	"github.com/joostme/conflux/internal/docker"
@@ -82,27 +85,37 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 	}
 	slog.Info("stacks discovered", "count", len(discovered))
 
-	// 4. Deploy each stack
-	deployed := 0
-	for _, stack := range discovered {
-		if err := ctx.Err(); err != nil {
-			slog.Warn("reconciliation interrupted", "deployed", deployed, "remaining", len(discovered)-deployed)
-			return err
-		}
+	// 4. Deploy stacks (optionally in parallel)
+	var deployed atomic.Int64
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(cfg.Stacks.ParallelDeploy)
 
-		slog.Info("processing stack", "stack", stack.Name)
-		envFile, err := envResolver.FileForStack(stack.Dir, cfg.Stacks)
-		if err != nil {
-			slog.Error("failed to resolve env file for stack", "stack", stack.Name, "error", err)
-			deployed++
-			continue
-		}
-		if err := r.compose.Up(ctx, stack, []string{envFile}); err != nil {
-			slog.Error("failed to deploy stack", "stack", stack.Name, "error", err)
-			deployed++
-			continue
-		}
-		deployed++
+	for _, stack := range discovered {
+		g.Go(func() error {
+			if err := gctx.Err(); err != nil {
+				return err
+			}
+
+			slog.Info("processing stack", "stack", stack.Name)
+			envFile, err := envResolver.FileForStack(stack.Dir, cfg.Stacks)
+			if err != nil {
+				slog.Error("failed to resolve env file for stack", "stack", stack.Name, "error", err)
+				deployed.Add(1)
+				return nil
+			}
+			if err := r.compose.Up(gctx, stack, envFile); err != nil {
+				slog.Error("failed to deploy stack", "stack", stack.Name, "error", err)
+				deployed.Add(1)
+				return nil
+			}
+			deployed.Add(1)
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		slog.Warn("reconciliation interrupted", "deployed", deployed.Load(), "total", len(discovered))
+		return err
 	}
 
 	// 5. Remove deleted stacks
@@ -130,7 +143,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 	}
 
 	slog.Info("reconciliation complete",
-		"deployed", deployed,
+		"deployed", deployed.Load(),
 		"removed_stacks", len(removedStacks),
 		"removed_networks", len(removedNetworks),
 	)

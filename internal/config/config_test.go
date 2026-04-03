@@ -31,6 +31,7 @@ networks:
 stacks:
   directory: apps
   file: docker-compose.yml
+  parallel_deploy: 4
   secrets:
     - my-secrets.enc.env
   environment:
@@ -101,6 +102,9 @@ stacks:
 	if len(cfg.Stacks.Environment) != 1 || cfg.Stacks.Environment[0] != "my-env.env" {
 		t.Errorf("stacks.Environment = %v, want [my-env.env]", cfg.Stacks.Environment)
 	}
+	if cfg.Stacks.ParallelDeploy != 4 {
+		t.Errorf("stacks.ParallelDeploy = %d, want 4", cfg.Stacks.ParallelDeploy)
+	}
 }
 
 func TestLoad_Defaults(t *testing.T) {
@@ -130,6 +134,9 @@ global:
 	}
 	if len(cfg.Stacks.Environment) != 1 || cfg.Stacks.Environment[0] != "environment.env" {
 		t.Errorf("default environment = %v, want [environment.env]", cfg.Stacks.Environment)
+	}
+	if cfg.Stacks.ParallelDeploy != 1 {
+		t.Errorf("default parallel_deploy = %d, want 1", cfg.Stacks.ParallelDeploy)
 	}
 }
 

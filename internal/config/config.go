@@ -23,10 +23,11 @@ type GlobalConfig struct {
 
 // StacksConfig defines how stacks are discovered.
 type StacksConfig struct {
-	Directory   string   `yaml:"directory"`
-	File        string   `yaml:"file"`
-	Secrets     []string `yaml:"secrets"`
-	Environment []string `yaml:"environment"`
+	Directory      string   `yaml:"directory"`
+	File           string   `yaml:"file"`
+	Secrets        []string `yaml:"secrets"`
+	Environment    []string `yaml:"environment"`
+	ParallelDeploy int      `yaml:"parallel_deploy"`
 }
 
 // NetworkConfig represents a single network definition in conflux.yaml.
@@ -84,6 +85,9 @@ func Load(repoDir, configFile string) (*Config, error) {
 	}
 	if len(cfg.Stacks.Environment) == 0 {
 		cfg.Stacks.Environment = []string{"environment.env"}
+	}
+	if cfg.Stacks.ParallelDeploy <= 0 {
+		cfg.Stacks.ParallelDeploy = 1
 	}
 
 	return cfg, nil

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/getsops/sops/v3/decrypt"
 	"github.com/joho/godotenv"
@@ -14,8 +15,10 @@ import (
 
 // Resolver resolves env and secret files for stacks, decrypting secrets in
 // memory and producing a single merged env file per stack.
+// It is safe for concurrent use by multiple goroutines.
 type Resolver struct {
 	globalContents [][]byte
+	mu             sync.Mutex
 	tempFiles      []string
 }
 
@@ -77,7 +80,9 @@ func (r *Resolver) mergeAndExpand(contents [][]byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("creating resolved env temp file: %w", err)
 	}
+	r.mu.Lock()
 	r.tempFiles = append(r.tempFiles, tmp.Name())
+	r.mu.Unlock()
 
 	content, err := godotenv.Marshal(merged)
 	if err != nil {
@@ -130,6 +135,9 @@ func resolveContents(baseDir string, environment, secrets []string) ([][]byte, e
 
 // Cleanup removes all temporary resolved env files.
 func (r *Resolver) Cleanup() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	var errs []error
 	for _, f := range r.tempFiles {
 		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
