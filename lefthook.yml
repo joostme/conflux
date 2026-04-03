@@ -1,0 +1,17 @@
+pre-commit:
+  commands:
+    fmt:
+      run: gofmt -w .
+
+pre-push:
+  commands:
+    vet:
+      run: go vet ./...
+    lint:
+      run: golangci-lint run
+    verify-deps:
+      run: go mod download && go mod verify
+    build:
+      run: go build -v ./...
+    test:
+      run: go test -coverprofile=coverage.out ./...

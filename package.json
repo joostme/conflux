@@ -5,11 +5,13 @@
   "description": "Release metadata and automation config for the Conflux image",
   "scripts": {
     "changeset": "changeset",
+    "prepare": "lefthook install",
     "version-packages": "changeset version",
     "release": "node scripts/create-github-release.mjs"
   },
   "devDependencies": {
     "@changesets/changelog-git": "^0.2.1",
-    "@changesets/cli": "^2.29.7"
+    "@changesets/cli": "^2.29.7",
+    "lefthook": "^2.1.4"
   }
 }
