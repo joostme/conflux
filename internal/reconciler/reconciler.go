@@ -19,16 +19,16 @@ import (
 type Reconciler struct {
 	repoDir    string
 	configFile string
-	compose    *docker.ComposeClient
+	docker     *docker.Client
 	networks   *networks.Manager
 }
 
 // New creates a new Reconciler.
-func New(repoDir, configFile string, compose *docker.ComposeClient, networkSvc *networks.Manager) *Reconciler {
+func New(repoDir, configFile string, dockerClient *docker.Client, networkSvc *networks.Manager) *Reconciler {
 	return &Reconciler{
 		repoDir:    repoDir,
 		configFile: configFile,
-		compose:    compose,
+		docker:     dockerClient,
 		networks:   networkSvc,
 	}
 }
@@ -38,6 +38,7 @@ func New(repoDir, configFile string, compose *docker.ComposeClient, networkSvc *
 //  2. Decrypt global secrets
 //  3. Discover and deploy stacks
 //  4. Remove stacks/networks that disappeared from git
+//  5. Optionally prune unused Docker resources after a fully successful deploy
 //
 // Networks are ensured before stacks and removed after stacks so that
 // dependencies are respected. Context cancellation is checked between
@@ -69,6 +70,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 
 	// 2. Ensure global networks exist before any stacks are deployed
 	if len(cfg.Networks) > 0 {
+		if r.networks == nil {
+			return fmt.Errorf("network manager not configured")
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -86,7 +90,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 	slog.Info("stacks discovered", "count", len(discovered))
 
 	// 4. Deploy stacks (optionally in parallel)
+	if len(discovered) > 0 && r.docker == nil {
+		return fmt.Errorf("docker client not configured")
+	}
+
 	var deployed atomic.Int64
+	var failed atomic.Int64
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(cfg.Stacks.ParallelDeploy)
 
@@ -100,12 +109,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 			envFile, err := envResolver.FileForStack(stack.Dir, cfg.Stacks)
 			if err != nil {
 				slog.Error("failed to resolve env file for stack", "stack", stack.Name, "error", err)
-				deployed.Add(1)
+				failed.Add(1)
 				return nil
 			}
-			if err := r.compose.Up(gctx, stack, envFile); err != nil {
+			if err := r.docker.Compose().Up(gctx, stack, envFile); err != nil {
 				slog.Error("failed to deploy stack", "stack", stack.Name, "error", err)
-				deployed.Add(1)
+				failed.Add(1)
 				return nil
 			}
 			deployed.Add(1)
@@ -114,24 +123,34 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 	}
 
 	if err := g.Wait(); err != nil {
-		slog.Warn("reconciliation interrupted", "deployed", deployed.Load(), "total", len(discovered))
+		slog.Warn("reconciliation interrupted",
+			"deployed", deployed.Load(),
+			"failed", failed.Load(),
+			"total", len(discovered),
+		)
 		return err
 	}
 
 	// 5. Remove deleted stacks
+	if len(removedStacks) > 0 && r.docker == nil {
+		return fmt.Errorf("docker client not configured")
+	}
 	for _, name := range removedStacks {
 		if err := ctx.Err(); err != nil {
 			slog.Warn("reconciliation interrupted during stack removal")
 			return err
 		}
 		slog.Info("stack removed from repo, tearing down", "stack", name)
-		if err := r.compose.Down(ctx, name); err != nil {
+		if err := r.docker.Compose().Down(ctx, name); err != nil {
 			slog.Error("failed to remove stack", "stack", name, "error", err)
 		}
 	}
 
 	// 6. Remove deleted networks (after stacks so containers are torn down first)
 	if len(removedNetworks) > 0 {
+		if r.networks == nil {
+			return fmt.Errorf("network manager not configured")
+		}
 		if err := ctx.Err(); err != nil {
 			slog.Warn("reconciliation interrupted before network removal")
 			return err
@@ -142,8 +161,37 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 		}
 	}
 
+	if failedCount := failed.Load(); failedCount > 0 {
+		if cfg.Stacks.AutoPrune {
+			slog.Warn("skipping automatic Docker prune because stack deployments failed", "failed", failedCount)
+		}
+		slog.Warn("reconciliation completed with deployment failures",
+			"deployed", deployed.Load(),
+			"failed", failedCount,
+			"removed_stacks", len(removedStacks),
+			"removed_networks", len(removedNetworks),
+		)
+		slog.Info("reconciliation complete",
+			"deployed", deployed.Load(),
+			"failed", failedCount,
+			"removed_stacks", len(removedStacks),
+			"removed_networks", len(removedNetworks),
+		)
+		return nil
+	}
+
+	if deployed.Load() > 0 && cfg.Stacks.AutoPrune {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := r.docker.Prune(ctx); err != nil {
+			return fmt.Errorf("pruning Docker resources: %w", err)
+		}
+	}
+
 	slog.Info("reconciliation complete",
 		"deployed", deployed.Load(),
+		"failed", failed.Load(),
 		"removed_stacks", len(removedStacks),
 		"removed_networks", len(removedNetworks),
 	)

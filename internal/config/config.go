@@ -28,6 +28,7 @@ type StacksConfig struct {
 	Secrets        []string `yaml:"secrets"`
 	Environment    []string `yaml:"environment"`
 	ParallelDeploy int      `yaml:"parallel_deploy"`
+	AutoPrune      bool     `yaml:"auto_prune"`
 }
 
 // NetworkConfig represents a single network definition in conflux.yaml.

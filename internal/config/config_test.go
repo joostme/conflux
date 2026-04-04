@@ -32,6 +32,7 @@ stacks:
   directory: apps
   file: docker-compose.yml
   parallel_deploy: 4
+  auto_prune: true
   secrets:
     - my-secrets.enc.env
   environment:
@@ -105,6 +106,9 @@ stacks:
 	if cfg.Stacks.ParallelDeploy != 4 {
 		t.Errorf("stacks.ParallelDeploy = %d, want 4", cfg.Stacks.ParallelDeploy)
 	}
+	if !cfg.Stacks.AutoPrune {
+		t.Error("stacks.AutoPrune should be true")
+	}
 }
 
 func TestLoad_Defaults(t *testing.T) {
@@ -137,6 +141,9 @@ global:
 	}
 	if cfg.Stacks.ParallelDeploy != 1 {
 		t.Errorf("default parallel_deploy = %d, want 1", cfg.Stacks.ParallelDeploy)
+	}
+	if cfg.Stacks.AutoPrune {
+		t.Error("default auto_prune should be false")
 	}
 }
 

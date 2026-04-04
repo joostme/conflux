@@ -75,8 +75,6 @@ stacks:
 	return repoDir
 }
 
-// --- Snapshot tests (replaces separate DiscoverStackNames / DiscoverNetworkNames tests) ---
-
 func TestSnapshot_Basic(t *testing.T) {
 	repoDir := setupRepoDirWithNetworks(t, []string{"nginx", "redis", "whoami"}, `
 networks:
@@ -92,7 +90,6 @@ networks:
 		t.Fatalf("Snapshot() error = %v", err)
 	}
 
-	// Verify stacks
 	if len(stackNames) != 3 {
 		t.Fatalf("expected 3 stacks, got %d", len(stackNames))
 	}
@@ -102,7 +99,6 @@ networks:
 		}
 	}
 
-	// Verify networks
 	if len(networkNames) != 2 {
 		t.Fatalf("expected 2 networks, got %d", len(networkNames))
 	}
@@ -157,7 +153,7 @@ func TestSnapshot_NoNetworks(t *testing.T) {
 }
 
 func TestSnapshot_EmptyStacks(t *testing.T) {
-	repoDir := setupRepoDir(t) // no stacks
+	repoDir := setupRepoDir(t)
 
 	rec := New(repoDir, "conflux.yaml", nil, nil)
 	stackNames, _, err := rec.Snapshot()
@@ -185,7 +181,6 @@ func TestSnapshot_AfterStackRemoval(t *testing.T) {
 
 	rec := New(repoDir, "conflux.yaml", nil, nil)
 
-	// Take "before" snapshot
 	before, _, err := rec.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot() before error = %v", err)
@@ -194,13 +189,11 @@ func TestSnapshot_AfterStackRemoval(t *testing.T) {
 		t.Fatalf("expected 3 stacks before, got %d", len(before))
 	}
 
-	// Simulate git pull removing "whoami" stack
 	whoamiDir := filepath.Join(repoDir, "stacks", "whoami")
 	if err := os.RemoveAll(whoamiDir); err != nil {
 		t.Fatal(err)
 	}
 
-	// Take "after" snapshot
 	after, _, err := rec.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot() after error = %v", err)
@@ -209,7 +202,6 @@ func TestSnapshot_AfterStackRemoval(t *testing.T) {
 		t.Fatalf("expected 2 stacks after, got %d", len(after))
 	}
 
-	// Verify the diff
 	if !before["whoami"] {
 		t.Error("whoami should be in before set")
 	}
@@ -232,7 +224,6 @@ networks:
 
 	rec := New(repoDir, "conflux.yaml", nil, nil)
 
-	// Take "before" snapshot
 	_, beforeNetworks, err := rec.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot() before error = %v", err)
@@ -241,7 +232,6 @@ networks:
 		t.Fatalf("expected 2 networks before, got %d", len(beforeNetworks))
 	}
 
-	// Simulate git pull that removes the "internal" network from config
 	newConfig := `
 stacks:
   directory: stacks
@@ -254,7 +244,6 @@ networks:
 		t.Fatal(err)
 	}
 
-	// Take "after" snapshot
 	_, afterNetworks, err := rec.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot() after error = %v", err)
@@ -263,7 +252,6 @@ networks:
 		t.Fatalf("expected 1 network after, got %d", len(afterNetworks))
 	}
 
-	// Verify the diff
 	if !beforeNetworks["internal"] {
 		t.Error("internal should be in before set")
 	}

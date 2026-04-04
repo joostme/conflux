@@ -71,8 +71,7 @@ func main() {
 	defer func() { _ = dockerClient.Close() }()
 
 	networkMgr := networks.NewManager(dockerClient.APIClient())
-
-	rec := reconciler.New(cfg.RepoDir, cfg.ConfigFile, dockerClient.Compose(), networkMgr)
+	rec := reconciler.New(cfg.RepoDir, cfg.ConfigFile, dockerClient, networkMgr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

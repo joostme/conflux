@@ -30,6 +30,7 @@ Conflux is a lightweight GitOps controller for Docker Compose. It polls a git re
 6. **Discover** — Scans the stacks directory for compose files
 7. **Deploy** — Runs `docker compose up -d --remove-orphans` per stack
 8. **Cleanup** — Tears down stacks that were removed from the repo
+9. **Prune** — Optionally prunes unused Docker images, volumes, and networks after a fully successful deploy cycle
 
 ## Configuration
 
@@ -73,11 +74,14 @@ stacks:
     directory: stacks           # Where to find stack subdirectories
     file: compose.yaml          # Compose filename to look for in each stack
     parallel_deploy: 1          # Number of stacks to deploy concurrently
+    auto_prune: false           # Prune unused Docker images, volumes, and networks after a fully successful reconcile
     secrets:                    # Default per-stack secret filenames
         - secrets.env
     environment:                # Default per-stack env filenames
         - environment.env
 ```
+
+When `stacks.auto_prune: true`, Conflux runs Docker's daemon-wide prune APIs after a reconcile only if at least one `docker compose up` succeeded and no stack deployments failed. This includes named volumes so stale compose volumes are reclaimed too.
 
 ### Networks
 
