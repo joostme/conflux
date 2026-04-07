@@ -22,6 +22,11 @@ type Resolver struct {
 	tempFiles      []string
 }
 
+// ResolvedEnv contains the canonical merged env content for a stack.
+type ResolvedEnv struct {
+	Content string
+}
+
 // NewResolver resolves global env/secret files upfront and returns a Resolver
 // that can produce per-stack env files via FileForStack.
 func NewResolver(repoDir string, cfg *config.Config) (*Resolver, error) {
@@ -36,28 +41,55 @@ func NewResolver(repoDir string, cfg *config.Config) (*Resolver, error) {
 	return r, nil
 }
 
-// FileForStack returns a single resolved env file path for a stack. All env
+// ResolveForStack returns the canonical merged env content for a stack. All env
 // and secret contents are collected in precedence order (global env, global
-// secrets, stack env, stack secrets), variable references like ${VAR} are
-// expanded, and the merged result is written to a single temporary file.
-func (r *Resolver) FileForStack(stackDir string, stacks config.StacksConfig) (string, error) {
+// secrets, stack env, stack secrets), and variable references like ${VAR} are
+// expanded.
+func (r *Resolver) ResolveForStack(stackDir string, stacks config.StacksConfig) (ResolvedEnv, error) {
 	contents := append([][]byte{}, r.globalContents...)
 
 	stackContents, err := resolveContents(stackDir, stacks.Environment, stacks.Secrets)
 	if err != nil {
-		return "", err
+		return ResolvedEnv{}, err
 	}
 	contents = append(contents, stackContents...)
 
 	return r.mergeAndExpand(contents)
 }
 
+// FileFromContent writes canonical env content to a temporary file and returns
+// its path for Compose consumption.
+func (r *Resolver) FileFromContent(content string) (string, error) {
+	if content == "" {
+		return "", nil
+	}
+
+	tmp, err := os.CreateTemp("", "conflux-resolved-*.env")
+	if err != nil {
+		return "", fmt.Errorf("creating resolved env temp file: %w", err)
+	}
+	r.mu.Lock()
+	r.tempFiles = append(r.tempFiles, tmp.Name())
+	r.mu.Unlock()
+
+	if _, err := tmp.WriteString(content); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("writing resolved env: %w", err)
+	}
+
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+
+	return tmp.Name(), nil
+}
+
 // mergeAndExpand concatenates all env content slices, parses them as a single
 // unit using godotenv (which expands ${VAR} references against previously
-// parsed values), and writes the result to a temporary file tracked for cleanup.
-func (r *Resolver) mergeAndExpand(contents [][]byte) (string, error) {
+// parsed values).
+func (r *Resolver) mergeAndExpand(contents [][]byte) (ResolvedEnv, error) {
 	if len(contents) == 0 {
-		return "", nil
+		return ResolvedEnv{}, nil
 	}
 
 	var combined []byte
@@ -73,29 +105,15 @@ func (r *Resolver) mergeAndExpand(contents [][]byte) (string, error) {
 
 	merged, err := godotenv.Unmarshal(string(combined))
 	if err != nil {
-		return "", fmt.Errorf("parsing env files for variable expansion: %w", err)
+		return ResolvedEnv{}, fmt.Errorf("parsing env files for variable expansion: %w", err)
 	}
-
-	tmp, err := os.CreateTemp("", "conflux-resolved-*.env")
-	if err != nil {
-		return "", fmt.Errorf("creating resolved env temp file: %w", err)
-	}
-	r.mu.Lock()
-	r.tempFiles = append(r.tempFiles, tmp.Name())
-	r.mu.Unlock()
 
 	content, err := godotenv.Marshal(merged)
 	if err != nil {
-		_ = tmp.Close()
-		return "", fmt.Errorf("marshaling resolved env: %w", err)
+		return ResolvedEnv{}, fmt.Errorf("marshaling resolved env: %w", err)
 	}
 
-	if _, err := tmp.WriteString(content + "\n"); err != nil {
-		_ = tmp.Close()
-		return "", fmt.Errorf("writing resolved env: %w", err)
-	}
-
-	return tmp.Name(), tmp.Close()
+	return ResolvedEnv{Content: content + "\n"}, nil
 }
 
 // resolveContents reads environment files from disk and decrypts secret files

@@ -12,6 +12,7 @@ import (
 	"github.com/joostme/conflux/internal/docker"
 	envfiles "github.com/joostme/conflux/internal/env"
 	"github.com/joostme/conflux/internal/networks"
+	"github.com/joostme/conflux/internal/reconcilestate"
 	"github.com/joostme/conflux/internal/stacks"
 )
 
@@ -19,18 +20,28 @@ import (
 type Reconciler struct {
 	repoDir    string
 	configFile string
-	docker     *docker.Client
 	networks   *networks.Manager
+	state      *reconcilestate.Store
+	up         func(context.Context, stacks.Stack, string) error
+	down       func(context.Context, string) error
+	prune      func(context.Context) error
 }
 
 // New creates a new Reconciler.
 func New(repoDir, configFile string, dockerClient *docker.Client, networkSvc *networks.Manager) *Reconciler {
-	return &Reconciler{
+	rec := &Reconciler{
 		repoDir:    repoDir,
 		configFile: configFile,
-		docker:     dockerClient,
 		networks:   networkSvc,
+		state:      reconcilestate.New(),
 	}
+	if dockerClient != nil {
+		rec.up = dockerClient.Compose().Up
+		rec.down = dockerClient.Compose().Down
+		rec.prune = dockerClient.Prune
+	}
+
+	return rec
 }
 
 // Reconcile performs a full reconciliation cycle:
@@ -90,12 +101,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 	slog.Info("stacks discovered", "count", len(discovered))
 
 	// 4. Deploy stacks (optionally in parallel)
-	if len(discovered) > 0 && r.docker == nil {
+	if len(discovered) > 0 && r.up == nil {
 		return fmt.Errorf("docker client not configured")
 	}
 
 	var deployed atomic.Int64
 	var failed atomic.Int64
+	var skipped atomic.Int64
+	repoStateKey := repoKey(r.repoDir, r.configFile)
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(cfg.Stacks.ParallelDeploy)
 
@@ -106,14 +119,47 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 			}
 
 			slog.Info("processing stack", "stack", stack.Name)
-			envFile, err := envResolver.FileForStack(stack.Dir, cfg.Stacks)
+			resolvedEnv, err := envResolver.ResolveForStack(stack.Dir, cfg.Stacks)
 			if err != nil {
 				slog.Error("failed to resolve env file for stack", "stack", stack.Name, "error", err)
 				failed.Add(1)
 				return nil
 			}
-			if err := r.docker.Compose().Up(gctx, stack, envFile); err != nil {
+
+			fingerprint, err := fingerprintStack(stack, resolvedEnv.Content)
+			if err != nil {
+				slog.Error("failed to fingerprint stack", "stack", stack.Name, "error", err)
+				failed.Add(1)
+				return nil
+			}
+
+			previousFingerprint, ok, err := r.state.Get(repoStateKey, stack.Name)
+			if err != nil {
+				slog.Error("failed to read reconcile state", "stack", stack.Name, "error", err)
+				failed.Add(1)
+				return nil
+			}
+
+			if ok && previousFingerprint == fingerprint {
+				slog.Info("stack unchanged, skipping compose up", "stack", stack.Name)
+				skipped.Add(1)
+				return nil
+			}
+
+			envFile, err := envResolver.FileFromContent(resolvedEnv.Content)
+			if err != nil {
+				slog.Error("failed to write env file for stack", "stack", stack.Name, "error", err)
+				failed.Add(1)
+				return nil
+			}
+
+			if err := r.up(gctx, stack, envFile); err != nil {
 				slog.Error("failed to deploy stack", "stack", stack.Name, "error", err)
+				failed.Add(1)
+				return nil
+			}
+			if err := r.state.Put(repoStateKey, stack.Name, fingerprint); err != nil {
+				slog.Error("failed to persist reconcile state", "stack", stack.Name, "error", err)
 				failed.Add(1)
 				return nil
 			}
@@ -132,7 +178,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 	}
 
 	// 5. Remove deleted stacks
-	if len(removedStacks) > 0 && r.docker == nil {
+	if len(removedStacks) > 0 && r.down == nil {
 		return fmt.Errorf("docker client not configured")
 	}
 	for _, name := range removedStacks {
@@ -141,8 +187,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 			return err
 		}
 		slog.Info("stack removed from repo, tearing down", "stack", name)
-		if err := r.docker.Compose().Down(ctx, name); err != nil {
+		if err := r.down(ctx, name); err != nil {
 			slog.Error("failed to remove stack", "stack", name, "error", err)
+			continue
+		}
+		if err := r.state.Delete(repoStateKey, name); err != nil {
+			slog.Error("failed to remove reconcile state for stack", "stack", name, "error", err)
 		}
 	}
 
@@ -167,12 +217,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 		}
 		slog.Warn("reconciliation completed with deployment failures",
 			"deployed", deployed.Load(),
+			"skipped", skipped.Load(),
 			"failed", failedCount,
 			"removed_stacks", len(removedStacks),
 			"removed_networks", len(removedNetworks),
 		)
 		slog.Info("reconciliation complete",
 			"deployed", deployed.Load(),
+			"skipped", skipped.Load(),
 			"failed", failedCount,
 			"removed_stacks", len(removedStacks),
 			"removed_networks", len(removedNetworks),
@@ -184,13 +236,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := r.docker.Prune(ctx); err != nil {
+		if err := r.prune(ctx); err != nil {
 			return fmt.Errorf("pruning Docker resources: %w", err)
 		}
 	}
 
 	slog.Info("reconciliation complete",
 		"deployed", deployed.Load(),
+		"skipped", skipped.Load(),
 		"failed", failed.Load(),
 		"removed_stacks", len(removedStacks),
 		"removed_networks", len(removedNetworks),

@@ -6,7 +6,7 @@
 
 Docker Compose GitOps — auto-deploy compose stacks from a git repo.
 
-Conflux is a lightweight GitOps controller for Docker Compose. It polls a git repository, discovers compose stacks, decrypts secrets with SOPS+AGE, and runs `docker compose up -d` to keep your services in sync with your repo. Think of it as Flux CD for your homelab.
+Conflux is a lightweight GitOps controller for Docker Compose. It polls a git repository, discovers compose stacks, decrypts secrets with SOPS+AGE, fingerprints each stack's desired state, and only runs `docker compose up -d` when that stack has changed. Think of it as Flux CD for your homelab.
 
 > **conflux** *(noun)* — from Latin *confluere*, "to flow together." A place where streams merge.
 > Conflux is where your git repo and Docker Compose stacks flow together.
@@ -28,9 +28,10 @@ Conflux is a lightweight GitOps controller for Docker Compose. It polls a git re
 4. **Networks** — Ensures global Docker networks exist (skips existing ones)
 5. **Decrypt** — Decrypts secret files in memory using SOPS with AGE keys
 6. **Discover** — Scans the stacks directory for compose files
-7. **Deploy** — Runs `docker compose up -d --remove-orphans` per stack
+7. **Deploy** — Runs `docker compose up -d --remove-orphans` only for stacks whose compose file or resolved env changed
 8. **Cleanup** — Tears down stacks that were removed from the repo
-9. **Prune** — Optionally prunes unused Docker images, volumes, and networks after a fully successful deploy cycle
+9. **State** — Stores last-applied stack fingerprints in `/data/reconcile-state.json`
+10. **Prune** — Optionally prunes unused Docker images, volumes, and networks after a fully successful deploy cycle
 
 ## Configuration
 
@@ -46,6 +47,8 @@ Conflux is a lightweight GitOps controller for Docker Compose. It polls a git re
 | `CONFLUX_REPO_DIR` | `/data/repo` | Where to clone the repository |
 | `CONFLUX_CONFIG_FILE` | `conflux.yaml` | Config filename in repo root |
 | `CONFLUX_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+
+Conflux also stores reconcile state in `/data/reconcile-state.json` so stack fingerprints survive container restarts when `/data` is backed by a persistent volume.
 
 ### Config File (`conflux.yaml`)
 
@@ -143,6 +146,8 @@ my-infra-repo/
 
 For each stack, Conflux collects all environment and secret files, decrypts secrets in memory with SOPS+AGE, and merges everything into a **single resolved env file**. Variables defined in later sources override earlier ones (last wins). The merged file also supports `${VAR}` substitution — any variable can reference a variable defined earlier in the merge order.
 
+Before deploying, Conflux hashes the stack's compose file plus the resolved env content and compares that fingerprint with the last successful apply stored in `/data/reconcile-state.json`. If the fingerprint is unchanged, the stack is skipped and `docker compose up` is not run.
+
 **Merge order (last wins):**
 
 1. **Global environment files** — plain-text, always applied
@@ -161,7 +166,7 @@ DATABASE_URL=postgres://app:${DB_PASSWORD}@db:5432/mydb
 
 Undefined references expand to an empty string.
 
-Global files are **always** included. Stack-level files don't replace them — they are merged after globals, so they take priority for any overlapping variable names. The single resolved file is passed as `--env-file` to `docker compose up`.
+Global files are **always** included. Stack-level files don't replace them — they are merged after globals, so they take priority for any overlapping variable names. The single resolved file is passed as `--env-file` to `docker compose up` when a stack fingerprint changes.
 
 ## SOPS + AGE Setup
 
@@ -250,7 +255,7 @@ Merge the generated changeset with your change. The release workflow will open a
 
 ## Design Decisions
 
-- **No complex reconciliation** — Just runs `docker compose up -d` and lets Docker handle whether containers need recreation. Simple and predictable.
+- **Minimal reconciliation** — Conflux fingerprints each stack's compose file and resolved env, skips unchanged stacks, and still relies on `docker compose up -d` to apply real changes.
 - **Git polling, not webhooks** — No need to expose ports or configure webhook endpoints. Works behind NATs and firewalls.
 - **Native git via go-git** — Uses [go-git](https://github.com/go-git/go-git) for all git operations (clone, fetch, reset). No git CLI dependency at runtime. SSH key auth is handled natively.
 - **Stack-level overrides are additive** — Global env/secret files are always included. All sources are merged into a single resolved env file with `${VAR}` expansion and last-wins semantics.

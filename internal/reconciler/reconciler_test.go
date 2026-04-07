@@ -1,10 +1,77 @@
 package reconciler
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+
+	"github.com/joostme/conflux/internal/reconcilestate"
+	stacktypes "github.com/joostme/conflux/internal/stacks"
 )
+
+type fakeCompose struct {
+	mu          sync.Mutex
+	upCalls     []string
+	downCalls   []string
+	upErrByName map[string]error
+}
+
+func (f *fakeCompose) Up(_ context.Context, stack stacktypes.Stack, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.upCalls = append(f.upCalls, stack.Name)
+	if err := f.upErrByName[stack.Name]; err != nil {
+		return err
+	}
+	return nil
+}
+
+func (f *fakeCompose) Down(_ context.Context, stackName string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.downCalls = append(f.downCalls, stackName)
+	return nil
+}
+
+func (f *fakeCompose) upCount(name string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	count := 0
+	for _, got := range f.upCalls {
+		if got == name {
+			count++
+		}
+	}
+	return count
+}
+
+func newTestStateStore(t *testing.T) *reconcilestate.Store {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "reconcile-state.json")
+	t.Setenv("CONFLUX_STATE_FILE", path)
+	store := reconcilestate.New()
+	storeDir := filepath.Dir(path)
+	if err := os.MkdirAll(storeDir, 0755); err != nil {
+		t.Fatalf("MkdirAll(%s) error = %v", storeDir, err)
+	}
+	_ = os.Remove(path)
+	return store
+}
+
+func newTestReconciler(repoDir string, compose *fakeCompose, store *reconcilestate.Store) *Reconciler {
+	return &Reconciler{
+		repoDir:    repoDir,
+		configFile: "conflux.yaml",
+		state:      store,
+		up:         compose.Up,
+		down:       compose.Down,
+		prune: func(context.Context) error {
+			return nil
+		},
+	}
+}
 
 // setupRepoDir creates a temporary repo directory with a conflux.yaml config
 // and the given stacks (each stack gets a compose.yaml file).
@@ -260,5 +327,111 @@ networks:
 	}
 	if !afterNetworks["proxy"] {
 		t.Error("proxy should still be in after set")
+	}
+}
+
+func TestReconcile_SkipsUnchangedStacks(t *testing.T) {
+	repoDir := setupRepoDir(t, "nginx")
+	compose := &fakeCompose{}
+	rec := newTestReconciler(repoDir, compose, newTestStateStore(t))
+
+	ctx := context.Background()
+	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+		t.Fatalf("first Reconcile() error = %v", err)
+	}
+	if compose.upCount("nginx") != 1 {
+		t.Fatalf("expected first reconcile to deploy stack once, got %d", compose.upCount("nginx"))
+	}
+
+	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+		t.Fatalf("second Reconcile() error = %v", err)
+	}
+	if compose.upCount("nginx") != 1 {
+		t.Fatalf("expected unchanged stack to be skipped, got %d deploys", compose.upCount("nginx"))
+	}
+}
+
+func TestReconcile_RedeploysWhenGlobalEnvChanges(t *testing.T) {
+	repoDir := setupRepoDir(t, "nginx", "redis")
+	configYAML := `
+global:
+  environment:
+    - global.env
+stacks:
+  directory: stacks
+  file: compose.yaml
+`
+	if err := os.WriteFile(filepath.Join(repoDir, "conflux.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "global.env"), []byte("TAG=1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	compose := &fakeCompose{}
+	rec := newTestReconciler(repoDir, compose, newTestStateStore(t))
+	ctx := context.Background()
+
+	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+		t.Fatalf("first Reconcile() error = %v", err)
+	}
+	if compose.upCount("nginx") != 1 || compose.upCount("redis") != 1 {
+		t.Fatalf("expected both stacks to deploy once, got nginx=%d redis=%d", compose.upCount("nginx"), compose.upCount("redis"))
+	}
+
+	if err := os.WriteFile(filepath.Join(repoDir, "global.env"), []byte("TAG=2\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+		t.Fatalf("second Reconcile() error = %v", err)
+	}
+	if compose.upCount("nginx") != 2 || compose.upCount("redis") != 2 {
+		t.Fatalf("expected both stacks to redeploy after global env change, got nginx=%d redis=%d", compose.upCount("nginx"), compose.upCount("redis"))
+	}
+}
+
+func TestReconcile_DoesNotAdvanceFingerprintOnDeployFailure(t *testing.T) {
+	repoDir := setupRepoDir(t, "nginx")
+	compose := &fakeCompose{upErrByName: map[string]error{"nginx": os.ErrPermission}}
+	rec := newTestReconciler(repoDir, compose, newTestStateStore(t))
+	ctx := context.Background()
+
+	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if compose.upCount("nginx") != 1 {
+		t.Fatalf("expected failed reconcile to attempt deploy once, got %d", compose.upCount("nginx"))
+	}
+
+	compose.upErrByName = nil
+	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+		t.Fatalf("second Reconcile() error = %v", err)
+	}
+	if compose.upCount("nginx") != 2 {
+		t.Fatalf("expected stack to deploy again after previous failure, got %d", compose.upCount("nginx"))
+	}
+}
+
+func TestReconcile_RemovesStoredFingerprintWhenStackDeleted(t *testing.T) {
+	repoDir := setupRepoDir(t, "nginx")
+	compose := &fakeCompose{}
+	store := newTestStateStore(t)
+	rec := newTestReconciler(repoDir, compose, store)
+	ctx := context.Background()
+
+	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+		t.Fatalf("first Reconcile() error = %v", err)
+	}
+
+	if err := rec.Reconcile(ctx, []string{"nginx"}, nil); err != nil {
+		t.Fatalf("second Reconcile() error = %v", err)
+	}
+
+	key := repoKey(repoDir, "conflux.yaml")
+	if _, ok, err := store.Get(key, "nginx"); err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	} else if ok {
+		t.Fatal("expected fingerprint entry to be removed after stack deletion")
 	}
 }

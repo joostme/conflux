@@ -16,9 +16,13 @@ func TestMergeAndExpand_BasicExpansion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
+	resolvedFile, err := r.FileFromContent(resolved.Content)
+	if err != nil {
+		t.Fatalf("FileFromContent() error = %v", err)
+	}
 	defer func() { _ = r.Cleanup() }()
 
-	got, err := godotenv.Read(resolved)
+	got, err := godotenv.Read(resolvedFile)
 	if err != nil {
 		t.Fatalf("reading resolved file: %v", err)
 	}
@@ -40,9 +44,13 @@ func TestMergeAndExpand_LastWinsPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
+	resolvedFile, err := r.FileFromContent(resolved.Content)
+	if err != nil {
+		t.Fatalf("FileFromContent() error = %v", err)
+	}
 	defer func() { _ = r.Cleanup() }()
 
-	got, err := godotenv.Read(resolved)
+	got, err := godotenv.Read(resolvedFile)
 	if err != nil {
 		t.Fatalf("reading resolved file: %v", err)
 	}
@@ -61,9 +69,13 @@ func TestMergeAndExpand_ConcatenationWithSecret(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
+	resolvedFile, err := r.FileFromContent(resolved.Content)
+	if err != nil {
+		t.Fatalf("FileFromContent() error = %v", err)
+	}
 	defer func() { _ = r.Cleanup() }()
 
-	got, err := godotenv.Read(resolved)
+	got, err := godotenv.Read(resolvedFile)
 	if err != nil {
 		t.Fatalf("reading resolved file: %v", err)
 	}
@@ -82,9 +94,13 @@ func TestMergeAndExpand_NoExpansionNeeded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
+	resolvedFile, err := r.FileFromContent(resolved.Content)
+	if err != nil {
+		t.Fatalf("FileFromContent() error = %v", err)
+	}
 	defer func() { _ = r.Cleanup() }()
 
-	got, err := godotenv.Read(resolved)
+	got, err := godotenv.Read(resolvedFile)
 	if err != nil {
 		t.Fatalf("reading resolved file: %v", err)
 	}
@@ -103,8 +119,8 @@ func TestMergeAndExpand_EmptyContents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
-	if resolved != "" {
-		t.Errorf("expected empty string for no contents, got %q", resolved)
+	if resolved != (ResolvedEnv{}) {
+		t.Errorf("expected zero ResolvedEnv for no contents, got %+v", resolved)
 	}
 }
 
@@ -116,9 +132,13 @@ func TestMergeAndExpand_CleanupRemovesTempFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
+	resolvedFile, err := r.FileFromContent(resolved.Content)
+	if err != nil {
+		t.Fatalf("FileFromContent() error = %v", err)
+	}
 
 	// File should exist before cleanup.
-	if _, err := os.Stat(resolved); err != nil {
+	if _, err := os.Stat(resolvedFile); err != nil {
 		t.Fatalf("resolved file should exist: %v", err)
 	}
 
@@ -127,7 +147,7 @@ func TestMergeAndExpand_CleanupRemovesTempFile(t *testing.T) {
 	}
 
 	// File should be gone after cleanup.
-	if _, err := os.Stat(resolved); !os.IsNotExist(err) {
+	if _, err := os.Stat(resolvedFile); !os.IsNotExist(err) {
 		t.Errorf("resolved temp file should be removed after Cleanup, err = %v", err)
 	}
 }
@@ -140,9 +160,13 @@ func TestMergeAndExpand_UndefinedVarExpandsToEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
+	resolvedFile, err := r.FileFromContent(resolved.Content)
+	if err != nil {
+		t.Fatalf("FileFromContent() error = %v", err)
+	}
 	defer func() { _ = r.Cleanup() }()
 
-	got, err := godotenv.Read(resolved)
+	got, err := godotenv.Read(resolvedFile)
 	if err != nil {
 		t.Fatalf("reading resolved file: %v", err)
 	}
@@ -161,9 +185,13 @@ func TestMergeAndExpand_MissingTrailingNewline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mergeAndExpand() error = %v", err)
 	}
+	resolvedFile, err := r.FileFromContent(resolved.Content)
+	if err != nil {
+		t.Fatalf("FileFromContent() error = %v", err)
+	}
 	defer func() { _ = r.Cleanup() }()
 
-	got, err := godotenv.Read(resolved)
+	got, err := godotenv.Read(resolvedFile)
 	if err != nil {
 		t.Fatalf("reading resolved file: %v", err)
 	}
@@ -173,5 +201,16 @@ func TestMergeAndExpand_MissingTrailingNewline(t *testing.T) {
 	}
 	if got["B"] != "1_2" {
 		t.Errorf("B = %q, want %q", got["B"], "1_2")
+	}
+}
+
+func TestFileFromContent_EmptyContent(t *testing.T) {
+	r := &Resolver{}
+	path, err := r.FileFromContent("")
+	if err != nil {
+		t.Fatalf("FileFromContent() error = %v", err)
+	}
+	if path != "" {
+		t.Fatalf("expected empty file path for empty content, got %q", path)
 	}
 }
