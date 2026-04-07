@@ -46,9 +46,10 @@ Conflux is a lightweight GitOps controller for Docker Compose. It polls a git re
 | `SOPS_AGE_KEY_FILE` | | Path to AGE key file for secret decryption |
 | `CONFLUX_REPO_DIR` | `/data/repo` | Where to clone the repository |
 | `CONFLUX_CONFIG_FILE` | `conflux.yaml` | Config filename in repo root |
+| `CONFLUX_STATE_FILE` | `/data/reconcile-state.json` | Where to persist stack fingerprint state |
 | `CONFLUX_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
-Conflux also stores reconcile state in `/data/reconcile-state.json` so stack fingerprints survive container restarts when `/data` is backed by a persistent volume.
+By default, Conflux stores reconcile state in `/data/reconcile-state.json` so stack fingerprints survive container restarts when `/data` is backed by a persistent volume. Override `CONFLUX_STATE_FILE` if you want to store that state somewhere else, such as when running the binary outside the container example layout.
 
 ### Config File (`conflux.yaml`)
 
