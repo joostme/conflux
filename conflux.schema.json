@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/joostme/conflux/main/conflux.schema.json",
+  "title": "Conflux Configuration",
+  "description": "Schema for conflux.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global": {
+      "$ref": "#/$defs/globalConfig"
+    },
+    "stacks": {
+      "$ref": "#/$defs/stacksConfig"
+    },
+    "networks": {
+      "type": "object",
+      "description": "Named Docker networks to ensure before stack deployment.",
+      "default": {},
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/networkConfig"
+      }
+    }
+  },
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "globalConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "secrets": {
+          "$ref": "#/$defs/stringList",
+          "description": "Global secret files applied to all stacks."
+        },
+        "environment": {
+          "$ref": "#/$defs/stringList",
+          "description": "Global environment files applied to all stacks."
+        }
+      }
+    },
+    "stacksConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "directory": {
+          "type": "string",
+          "description": "Directory containing stack subdirectories.",
+          "default": "stacks"
+        },
+        "file": {
+          "type": "string",
+          "description": "Compose filename expected within each stack directory.",
+          "default": "compose.yaml"
+        },
+        "secrets": {
+          "$ref": "#/$defs/stringList",
+          "description": "Default per-stack secret filenames.",
+          "default": [
+            "secrets.env"
+          ]
+        },
+        "environment": {
+          "$ref": "#/$defs/stringList",
+          "description": "Default per-stack environment filenames.",
+          "default": [
+            "environment.env"
+          ]
+        },
+        "parallel_deploy": {
+          "type": "integer",
+          "description": "Number of stacks to deploy concurrently.",
+          "minimum": 1,
+          "default": 1
+        },
+        "auto_prune": {
+          "type": "boolean",
+          "description": "Prune unused Docker resources after a fully successful reconcile.",
+          "default": false
+        }
+      }
+    },
+    "networkConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Override the Docker network name. Defaults to the map key."
+        },
+        "driver": {
+          "type": "string",
+          "description": "Docker network driver, such as bridge or overlay."
+        },
+        "driver_opts": {
+          "type": "object",
+          "description": "Driver-specific options.",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "enable_ipv4": {
+          "type": "boolean",
+          "description": "Enable or disable IPv4 for this network."
+        },
+        "enable_ipv6": {
+          "type": "boolean",
+          "description": "Enable or disable IPv6 for this network."
+        },
+        "internal": {
+          "type": "boolean",
+          "description": "Restrict external access to this network.",
+          "default": false
+        },
+        "attachable": {
+          "type": "boolean",
+          "description": "Allow standalone containers to attach to this network.",
+          "default": false
+        },
+        "labels": {
+          "type": "object",
+          "description": "Metadata labels for the network.",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "ipam": {
+          "$ref": "#/$defs/ipam"
+        }
+      }
+    },
+    "ipam": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "driver": {
+          "type": "string",
+          "description": "IPAM driver."
+        },
+        "config": {
+          "type": "array",
+          "description": "IPAM pool configuration entries.",
+          "items": {
+            "$ref": "#/$defs/ipamPool"
+          },
+          "default": []
+        },
+        "options": {
+          "type": "object",
+          "description": "IPAM driver options.",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ipamPool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subnet": {
+          "type": "string",
+          "description": "Subnet in CIDR notation."
+        },
+        "ip_range": {
+          "type": "string",
+          "description": "Allocated IP range in CIDR notation."
+        },
+        "gateway": {
+          "type": "string",
+          "description": "Gateway IP address."
+        },
+        "aux_addresses": {
+          "type": "object",
+          "description": "Named auxiliary addresses.",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
