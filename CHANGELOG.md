@@ -1,5 +1,14 @@
 # conflux
 
+## 0.2.2
+
+### Patch Changes
+
+- fc5d096: Keep generated Docker Compose env files in a stable key order.
+
+  Resolved env output now sorts keys before writing so reconcile fingerprints stay
+  consistent across loops and unchanged stacks are not redeployed unnecessarily.
+
 ## 0.2.1
 
 ### Patch Changes
