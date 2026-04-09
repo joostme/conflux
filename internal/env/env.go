@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/getsops/sops/v3/decrypt"
@@ -108,12 +109,24 @@ func (r *Resolver) mergeAndExpand(contents [][]byte) (ResolvedEnv, error) {
 		return ResolvedEnv{}, fmt.Errorf("parsing env files for variable expansion: %w", err)
 	}
 
-	content, err := godotenv.Marshal(merged)
-	if err != nil {
-		return ResolvedEnv{}, fmt.Errorf("marshaling resolved env: %w", err)
+	return ResolvedEnv{Content: marshalComposeEnv(merged)}, nil
+}
+
+// marshalComposeEnv writes env values verbatim for Docker Compose.
+func marshalComposeEnv(values map[string]string) string {
+	if len(values) == 0 {
+		return ""
 	}
 
-	return ResolvedEnv{Content: content + "\n"}, nil
+	var b strings.Builder
+	for key, value := range values {
+		b.WriteString(key)
+		b.WriteByte('=')
+		b.WriteString(value)
+		b.WriteByte('\n')
+	}
+
+	return b.String()
 }
 
 // resolveContents reads environment files from disk and decrypts secret files

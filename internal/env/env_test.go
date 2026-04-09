@@ -2,6 +2,7 @@ package env
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/joho/godotenv"
@@ -201,6 +202,23 @@ func TestMergeAndExpand_MissingTrailingNewline(t *testing.T) {
 	}
 	if got["B"] != "1_2" {
 		t.Errorf("B = %q, want %q", got["B"], "1_2")
+	}
+}
+
+func TestMergeAndExpand_PreservesLiteralSpecialCharacters(t *testing.T) {
+	r := &Resolver{}
+	resolved, err := r.mergeAndExpand([][]byte{
+		[]byte("PASSWORD=TEST!123\n"),
+	})
+	if err != nil {
+		t.Fatalf("mergeAndExpand() error = %v", err)
+	}
+
+	if strings.Contains(resolved.Content, `\!`) {
+		t.Fatalf("resolved content escaped '!': %q", resolved.Content)
+	}
+	if !strings.Contains(resolved.Content, "PASSWORD=TEST!123\n") {
+		t.Fatalf("resolved content missing literal password: %q", resolved.Content)
 	}
 }
 
