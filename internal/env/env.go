@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -113,16 +114,24 @@ func (r *Resolver) mergeAndExpand(contents [][]byte) (ResolvedEnv, error) {
 }
 
 // marshalComposeEnv writes env values verbatim for Docker Compose.
+// Keys are sorted so the generated content stays stable across reconcile loops,
+// which keeps stack fingerprinting from triggering unnecessary redeploys.
 func marshalComposeEnv(values map[string]string) string {
 	if len(values) == 0 {
 		return ""
 	}
 
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
 	var b strings.Builder
-	for key, value := range values {
+	for _, key := range keys {
 		b.WriteString(key)
 		b.WriteByte('=')
-		b.WriteString(value)
+		b.WriteString(values[key])
 		b.WriteByte('\n')
 	}
 

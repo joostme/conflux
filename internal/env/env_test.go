@@ -222,6 +222,17 @@ func TestMergeAndExpand_PreservesLiteralSpecialCharacters(t *testing.T) {
 	}
 }
 
+func TestMarshalComposeEnv_SortsKeysForStableOutput(t *testing.T) {
+	got := marshalComposeEnv(map[string]string{
+		"B": "2",
+		"A": "1",
+	})
+
+	if got != "A=1\nB=2\n" {
+		t.Fatalf("marshalComposeEnv() = %q, want %q", got, "A=1\nB=2\n")
+	}
+}
+
 func TestFileFromContent_EmptyContent(t *testing.T) {
 	r := &Resolver{}
 	path, err := r.FileFromContent("")
