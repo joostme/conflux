@@ -27,7 +27,8 @@ func (c *Controller) InitialSync(ctx context.Context) error {
 
 	if freshClone {
 		slog.Info("fresh clone, deploying all stacks")
-		return c.rec.Reconcile(ctx, nil, nil)
+		_, err := c.rec.Reconcile(ctx, nil, nil)
+		return err
 	}
 
 	return c.fetchAndReconcile(ctx, true)
@@ -70,7 +71,8 @@ func (c *Controller) fetchAndReconcile(ctx context.Context, ensureRunning bool) 
 			return nil
 		}
 		slog.Info("no changes detected, reconciling to ensure all stacks are running")
-		return c.rec.Reconcile(ctx, nil, nil)
+		_, err := c.rec.Reconcile(ctx, nil, nil)
+		return err
 	}
 
 	if err := c.repo.Reset(*remoteHash); err != nil {
@@ -85,7 +87,8 @@ func (c *Controller) fetchAndReconcile(ctx context.Context, ensureRunning bool) 
 		"removed_stacks", len(removedStacks),
 		"removed_networks", len(removedNetworks),
 	)
-	return c.rec.Reconcile(ctx, removedStacks, removedNetworks)
+	_, err = c.rec.Reconcile(ctx, removedStacks, removedNetworks)
+	return err
 }
 
 // repoState holds discovered resource names from a worktree snapshot.

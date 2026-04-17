@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
+	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
@@ -25,15 +28,58 @@ type Reconciler struct {
 	up         func(context.Context, stacks.Stack, string) error
 	down       func(context.Context, string) error
 	prune      func(context.Context) error
+	notify     func(context.Context, string, map[string]string) error
+}
+
+// Result summarizes the outcome of a reconciliation cycle.
+type Result struct {
+	Deployed        int
+	DeployedStacks  []string
+	Skipped         int
+	Failed          int
+	FailedStacks    []string
+	RemovedStacks   int
+	RemovedStackIDs []string
+	RemovedNetworks int
+}
+
+func recordStackName(mu *sync.Mutex, names *[]string, name string) {
+	mu.Lock()
+	defer mu.Unlock()
+	*names = append(*names, name)
+}
+
+// Changed reports whether the reconcile run applied any changes.
+func (r Result) Changed() bool {
+	return r.Deployed > 0 || r.RemovedStacks > 0 || r.RemovedNetworks > 0 || r.Failed > 0
+}
+
+func (r Result) notificationMessage() string {
+	parts := []string{"Conflux run changed"}
+	if r.Deployed > 0 {
+		parts = append(parts, fmt.Sprintf("Deployed: %s", strings.Join(r.DeployedStacks, ", ")))
+	}
+	if r.RemovedStacks > 0 {
+		parts = append(parts, fmt.Sprintf("Removed: %s", strings.Join(r.RemovedStackIDs, ", ")))
+	}
+	if r.RemovedNetworks > 0 {
+		parts = append(parts, fmt.Sprintf("Removed networks: %d", r.RemovedNetworks))
+	}
+	if r.Failed > 0 {
+		parts = append(parts, fmt.Sprintf("Failed: %s", strings.Join(r.FailedStacks, ", ")))
+	}
+
+	return strings.Join(parts, "\n")
 }
 
 // New creates a new Reconciler.
-func New(repoDir, configFile string, dockerClient *docker.Client, networkSvc *networks.Manager) *Reconciler {
+func New(repoDir, configFile string, dockerClient *docker.Client, networkSvc *networks.Manager, notify func(context.Context, string, map[string]string) error) *Reconciler {
 	rec := &Reconciler{
 		repoDir:    repoDir,
 		configFile: configFile,
 		networks:   networkSvc,
 		state:      reconcilestate.New(),
+		notify:     notify,
 	}
 	if dockerClient != nil {
 		rec.up = dockerClient.Compose().Up
@@ -54,13 +100,14 @@ func New(repoDir, configFile string, dockerClient *docker.Client, networkSvc *ne
 // Networks are ensured before stacks and removed after stacks so that
 // dependencies are respected. Context cancellation is checked between
 // each major phase and individual stack operation.
-func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetworks []string) error {
+func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetworks []string) (Result, error) {
 	slog.Info("starting reconciliation")
+	result := Result{}
 
 	// 1. Parse config
 	cfg, err := config.Load(r.repoDir, r.configFile)
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return result, fmt.Errorf("loading config: %w", err)
 	}
 	slog.Info("config loaded",
 		"stacks_dir", cfg.Stacks.Directory,
@@ -71,7 +118,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 
 	envResolver, err := envfiles.NewResolver(r.repoDir, cfg)
 	if err != nil {
-		return fmt.Errorf("resolving global env files: %w", err)
+		return result, fmt.Errorf("resolving global env files: %w", err)
 	}
 	defer func() {
 		if err := envResolver.Cleanup(); err != nil {
@@ -82,32 +129,33 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 	// 2. Ensure global networks exist before any stacks are deployed
 	if len(cfg.Networks) > 0 {
 		if r.networks == nil {
-			return fmt.Errorf("network manager not configured")
+			return result, fmt.Errorf("network manager not configured")
 		}
 		if err := ctx.Err(); err != nil {
-			return err
+			return result, err
 		}
 		slog.Info("ensuring networks", "count", len(cfg.Networks))
 		if err := r.networks.Ensure(ctx, cfg.Networks); err != nil {
-			return fmt.Errorf("ensuring networks: %w", err)
+			return result, fmt.Errorf("ensuring networks: %w", err)
 		}
 	}
 
 	// 3. Discover stacks
 	discovered, err := stacks.Discover(r.repoDir, cfg)
 	if err != nil {
-		return fmt.Errorf("discovering stacks: %w", err)
+		return result, fmt.Errorf("discovering stacks: %w", err)
 	}
 	slog.Info("stacks discovered", "count", len(discovered))
 
 	// 4. Deploy stacks (optionally in parallel)
 	if len(discovered) > 0 && r.up == nil {
-		return fmt.Errorf("docker client not configured")
+		return result, fmt.Errorf("docker client not configured")
 	}
 
 	var deployed atomic.Int64
 	var failed atomic.Int64
 	var skipped atomic.Int64
+	var resultMu sync.Mutex
 	repoStateKey := repoKey(r.repoDir, r.configFile)
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(cfg.Stacks.ParallelDeploy)
@@ -118,52 +166,61 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 				return err
 			}
 
-			slog.Info("processing stack", "stack", stack.Name)
+			stackName := stack.Name
+
+			slog.Info("processing stack", "stack", stackName)
 			resolvedEnv, err := envResolver.ResolveForStack(stack.Dir, cfg.Stacks)
 			if err != nil {
-				slog.Error("failed to resolve env file for stack", "stack", stack.Name, "error", err)
+				slog.Error("failed to resolve env file for stack", "stack", stackName, "error", err)
 				failed.Add(1)
+				recordStackName(&resultMu, &result.FailedStacks, stackName)
 				return nil
 			}
 
 			fingerprint, err := fingerprintStack(stack, resolvedEnv.Content)
 			if err != nil {
-				slog.Error("failed to fingerprint stack", "stack", stack.Name, "error", err)
+				slog.Error("failed to fingerprint stack", "stack", stackName, "error", err)
 				failed.Add(1)
+				recordStackName(&resultMu, &result.FailedStacks, stackName)
 				return nil
 			}
 
-			previousFingerprint, ok, err := r.state.Get(repoStateKey, stack.Name)
+			previousFingerprint, ok, err := r.state.Get(repoStateKey, stackName)
 			if err != nil {
-				slog.Error("failed to read reconcile state", "stack", stack.Name, "error", err)
+				slog.Error("failed to read reconcile state", "stack", stackName, "error", err)
 				failed.Add(1)
+				recordStackName(&resultMu, &result.FailedStacks, stackName)
 				return nil
 			}
 
 			if ok && previousFingerprint == fingerprint {
-				slog.Info("stack unchanged, skipping compose up", "stack", stack.Name)
+				slog.Info("stack unchanged, skipping compose up", "stack", stackName)
 				skipped.Add(1)
 				return nil
 			}
 
 			envFile, err := envResolver.FileFromContent(resolvedEnv.Content)
 			if err != nil {
-				slog.Error("failed to write env file for stack", "stack", stack.Name, "error", err)
+				slog.Error("failed to write env file for stack", "stack", stackName, "error", err)
 				failed.Add(1)
+				recordStackName(&resultMu, &result.FailedStacks, stackName)
 				return nil
 			}
 
 			if err := r.up(gctx, stack, envFile); err != nil {
-				slog.Error("failed to deploy stack", "stack", stack.Name, "error", err)
+				slog.Error("failed to deploy stack", "stack", stackName, "error", err)
 				failed.Add(1)
+				recordStackName(&resultMu, &result.FailedStacks, stackName)
 				return nil
 			}
-			if err := r.state.Put(repoStateKey, stack.Name, fingerprint); err != nil {
-				slog.Error("failed to persist reconcile state", "stack", stack.Name, "error", err)
+			if err := r.state.Put(repoStateKey, stackName, fingerprint); err != nil {
+				slog.Error("failed to persist reconcile state", "stack", stackName, "error", err)
 				failed.Add(1)
+				recordStackName(&resultMu, &result.FailedStacks, stackName)
 				return nil
 			}
 			deployed.Add(1)
+			recordStackName(&resultMu, &result.DeployedStacks, stackName)
 			return nil
 		})
 	}
@@ -174,40 +231,51 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 			"failed", failed.Load(),
 			"total", len(discovered),
 		)
-		return err
+		return result, err
 	}
+
+	result.Deployed = int(deployed.Load())
+	result.Failed = int(failed.Load())
+	result.Skipped = int(skipped.Load())
+	sort.Strings(result.DeployedStacks)
+	sort.Strings(result.FailedStacks)
 
 	// 5. Remove deleted stacks
 	if len(removedStacks) > 0 && r.down == nil {
-		return fmt.Errorf("docker client not configured")
+		return result, fmt.Errorf("docker client not configured")
 	}
 	for _, name := range removedStacks {
 		if err := ctx.Err(); err != nil {
 			slog.Warn("reconciliation interrupted during stack removal")
-			return err
+			return result, err
 		}
 		slog.Info("stack removed from repo, tearing down", "stack", name)
 		if err := r.down(ctx, name); err != nil {
 			slog.Error("failed to remove stack", "stack", name, "error", err)
 			continue
 		}
+		result.RemovedStacks++
+		result.RemovedStackIDs = append(result.RemovedStackIDs, name)
 		if err := r.state.Delete(repoStateKey, name); err != nil {
 			slog.Error("failed to remove reconcile state for stack", "stack", name, "error", err)
 		}
 	}
+	sort.Strings(result.RemovedStackIDs)
 
 	// 6. Remove deleted networks (after stacks so containers are torn down first)
 	if len(removedNetworks) > 0 {
 		if r.networks == nil {
-			return fmt.Errorf("network manager not configured")
+			return result, fmt.Errorf("network manager not configured")
 		}
 		if err := ctx.Err(); err != nil {
 			slog.Warn("reconciliation interrupted before network removal")
-			return err
+			return result, err
 		}
 		slog.Info("removing networks", "count", len(removedNetworks))
 		if err := r.networks.Remove(ctx, removedNetworks); err != nil {
 			slog.Error("failed to remove networks", "error", err)
+		} else {
+			result.RemovedNetworks = len(removedNetworks)
 		}
 	}
 
@@ -229,15 +297,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 			"removed_stacks", len(removedStacks),
 			"removed_networks", len(removedNetworks),
 		)
-		return nil
+		r.notifyChanged(ctx, result)
+		return result, nil
 	}
 
 	if deployed.Load() > 0 && cfg.Stacks.AutoPrune {
 		if err := ctx.Err(); err != nil {
-			return err
+			return result, err
 		}
 		if err := r.prune(ctx); err != nil {
-			return fmt.Errorf("pruning Docker resources: %w", err)
+			return result, fmt.Errorf("pruning Docker resources: %w", err)
 		}
 	}
 
@@ -248,7 +317,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, removedStacks, removedNetwor
 		"removed_stacks", len(removedStacks),
 		"removed_networks", len(removedNetworks),
 	)
-	return nil
+	r.notifyChanged(ctx, result)
+	return result, nil
+}
+
+func (r *Reconciler) notifyChanged(ctx context.Context, result Result) {
+	if r.notify == nil || !result.Changed() {
+		return
+	}
+
+	params := map[string]string{"title": "Conflux run changed"}
+	if err := r.notify(ctx, result.notificationMessage(), params); err != nil {
+		slog.Warn("failed to send notification", "error", err)
+	}
 }
 
 // Snapshot returns stack and network names from the current worktree.

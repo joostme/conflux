@@ -48,8 +48,26 @@ Conflux is a lightweight GitOps controller for Docker Compose. It polls a git re
 | `CONFLUX_CONFIG_FILE` | `conflux.yaml` | Config filename in repo root |
 | `CONFLUX_STATE_FILE` | `/data/reconcile-state.json` | Where to persist stack fingerprint state |
 | `CONFLUX_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `CONFLUX_NOTIFY_URLS` | | Comma-separated or newline-separated [Shoutrrr](https://containrrr.dev/shoutrrr/latest/) URLs for notifications when a reconcile changes anything |
 
 By default, Conflux stores reconcile state in `/data/reconcile-state.json` so stack fingerprints survive container restarts when `/data` is backed by a persistent volume. Override `CONFLUX_STATE_FILE` if you want to store that state somewhere else, such as when running the binary outside the container example layout.
+
+When `CONFLUX_NOTIFY_URLS` is set, Conflux sends a notification after a reconcile only if it actually changed something: at least one stack was deployed, or a managed stack/network was removed. This is configured at the container level, so it fits naturally in your `docker-compose.yml`.
+
+Examples:
+
+```yaml
+environment:
+  CONFLUX_NOTIFY_URLS: >-
+    telegram://BOT_TOKEN@telegram?channels=@mychannel,
+    discord://TOKEN@CHANNEL_ID
+```
+
+or with an env file:
+
+```env
+CONFLUX_NOTIFY_URLS=telegram://BOT_TOKEN@telegram?channels=@mychannel,discord://TOKEN@CHANNEL_ID
+```
 
 ### Config File (`conflux.yaml`)
 
@@ -233,6 +251,9 @@ services:
       CONFLUX_GIT_KEY: /ssh.key
       SOPS_AGE_KEY_FILE: /age.key
       CONFLUX_POLL_INTERVAL: 60s
+      CONFLUX_NOTIFY_URLS: >-
+        telegram://BOT_TOKEN@telegram?channels=@mychannel,
+        discord://TOKEN@CHANNEL_ID
 
 volumes:
   conflux-data:

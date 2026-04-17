@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -16,6 +17,26 @@ type fakeCompose struct {
 	upCalls     []string
 	downCalls   []string
 	upErrByName map[string]error
+}
+
+type fakeNotifier struct {
+	mu       sync.Mutex
+	messages []string
+	params   []map[string]string
+}
+
+func (f *fakeNotifier) Send(_ context.Context, message string, params map[string]string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.messages = append(f.messages, message)
+	f.params = append(f.params, params)
+	return nil
+}
+
+func (f *fakeNotifier) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.messages)
 }
 
 func (f *fakeCompose) Up(_ context.Context, stack stacktypes.Stack, _ string) error {
@@ -71,6 +92,14 @@ func newTestReconciler(repoDir string, compose *fakeCompose, store *reconcilesta
 			return nil
 		},
 	}
+}
+
+func newTestReconcilerWithNotifier(repoDir string, compose *fakeCompose, store *reconcilestate.Store, notifier *fakeNotifier) *Reconciler {
+	rec := newTestReconciler(repoDir, compose, store)
+	if notifier != nil {
+		rec.notify = notifier.Send
+	}
+	return rec
 }
 
 // setupRepoDir creates a temporary repo directory with a conflux.yaml config
@@ -151,7 +180,7 @@ networks:
     driver: bridge
 `)
 
-	rec := New(repoDir, "conflux.yaml", nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
 	stackNames, networkNames, err := rec.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
@@ -185,7 +214,7 @@ networks:
     driver: bridge
 `)
 
-	rec := New(repoDir, "conflux.yaml", nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
 	_, networkNames, err := rec.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
@@ -205,7 +234,7 @@ networks:
 func TestSnapshot_NoNetworks(t *testing.T) {
 	repoDir := setupRepoDir(t, "nginx")
 
-	rec := New(repoDir, "conflux.yaml", nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
 	stackNames, networkNames, err := rec.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
@@ -222,7 +251,7 @@ func TestSnapshot_NoNetworks(t *testing.T) {
 func TestSnapshot_EmptyStacks(t *testing.T) {
 	repoDir := setupRepoDir(t)
 
-	rec := New(repoDir, "conflux.yaml", nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
 	stackNames, _, err := rec.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot() error = %v", err)
@@ -236,7 +265,7 @@ func TestSnapshot_EmptyStacks(t *testing.T) {
 func TestSnapshot_MissingConfig(t *testing.T) {
 	repoDir := t.TempDir()
 
-	rec := New(repoDir, "conflux.yaml", nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
 	_, _, err := rec.Snapshot()
 	if err == nil {
 		t.Fatal("expected error for missing config, got nil")
@@ -246,7 +275,7 @@ func TestSnapshot_MissingConfig(t *testing.T) {
 func TestSnapshot_AfterStackRemoval(t *testing.T) {
 	repoDir := setupRepoDir(t, "nginx", "redis", "whoami")
 
-	rec := New(repoDir, "conflux.yaml", nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
 
 	before, _, err := rec.Snapshot()
 	if err != nil {
@@ -289,7 +318,7 @@ networks:
     driver: bridge
 `)
 
-	rec := New(repoDir, "conflux.yaml", nil, nil)
+	rec := New(repoDir, "conflux.yaml", nil, nil, nil)
 
 	_, beforeNetworks, err := rec.Snapshot()
 	if err != nil {
@@ -336,14 +365,14 @@ func TestReconcile_SkipsUnchangedStacks(t *testing.T) {
 	rec := newTestReconciler(repoDir, compose, newTestStateStore(t))
 
 	ctx := context.Background()
-	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+	if _, err := rec.Reconcile(ctx, nil, nil); err != nil {
 		t.Fatalf("first Reconcile() error = %v", err)
 	}
 	if compose.upCount("nginx") != 1 {
 		t.Fatalf("expected first reconcile to deploy stack once, got %d", compose.upCount("nginx"))
 	}
 
-	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+	if _, err := rec.Reconcile(ctx, nil, nil); err != nil {
 		t.Fatalf("second Reconcile() error = %v", err)
 	}
 	if compose.upCount("nginx") != 1 {
@@ -372,7 +401,7 @@ stacks:
 	rec := newTestReconciler(repoDir, compose, newTestStateStore(t))
 	ctx := context.Background()
 
-	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+	if _, err := rec.Reconcile(ctx, nil, nil); err != nil {
 		t.Fatalf("first Reconcile() error = %v", err)
 	}
 	if compose.upCount("nginx") != 1 || compose.upCount("redis") != 1 {
@@ -383,7 +412,7 @@ stacks:
 		t.Fatal(err)
 	}
 
-	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+	if _, err := rec.Reconcile(ctx, nil, nil); err != nil {
 		t.Fatalf("second Reconcile() error = %v", err)
 	}
 	if compose.upCount("nginx") != 2 || compose.upCount("redis") != 2 {
@@ -397,7 +426,7 @@ func TestReconcile_DoesNotAdvanceFingerprintOnDeployFailure(t *testing.T) {
 	rec := newTestReconciler(repoDir, compose, newTestStateStore(t))
 	ctx := context.Background()
 
-	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+	if _, err := rec.Reconcile(ctx, nil, nil); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 	if compose.upCount("nginx") != 1 {
@@ -405,7 +434,7 @@ func TestReconcile_DoesNotAdvanceFingerprintOnDeployFailure(t *testing.T) {
 	}
 
 	compose.upErrByName = nil
-	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+	if _, err := rec.Reconcile(ctx, nil, nil); err != nil {
 		t.Fatalf("second Reconcile() error = %v", err)
 	}
 	if compose.upCount("nginx") != 2 {
@@ -420,11 +449,11 @@ func TestReconcile_RemovesStoredFingerprintWhenStackDeleted(t *testing.T) {
 	rec := newTestReconciler(repoDir, compose, store)
 	ctx := context.Background()
 
-	if err := rec.Reconcile(ctx, nil, nil); err != nil {
+	if _, err := rec.Reconcile(ctx, nil, nil); err != nil {
 		t.Fatalf("first Reconcile() error = %v", err)
 	}
 
-	if err := rec.Reconcile(ctx, []string{"nginx"}, nil); err != nil {
+	if _, err := rec.Reconcile(ctx, []string{"nginx"}, nil); err != nil {
 		t.Fatalf("second Reconcile() error = %v", err)
 	}
 
@@ -433,5 +462,88 @@ func TestReconcile_RemovesStoredFingerprintWhenStackDeleted(t *testing.T) {
 		t.Fatalf("store.Get() error = %v", err)
 	} else if ok {
 		t.Fatal("expected fingerprint entry to be removed after stack deletion")
+	}
+}
+
+func TestReconcile_SendsNotificationWhenChanged(t *testing.T) {
+	repoDir := setupRepoDir(t, "nginx")
+	compose := &fakeCompose{}
+	notifier := &fakeNotifier{}
+	rec := newTestReconcilerWithNotifier(repoDir, compose, newTestStateStore(t), notifier)
+
+	result, err := rec.Reconcile(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if !result.Changed() {
+		t.Fatal("expected reconcile result to report changes")
+	}
+	if notifier.count() != 1 {
+		t.Fatalf("expected 1 notification, got %d", notifier.count())
+	}
+	if !strings.Contains(notifier.messages[0], "Deployed: nginx") {
+		t.Fatalf("expected notification to include deployed stack name, got %q", notifier.messages[0])
+	}
+	if !strings.Contains(notifier.messages[0], "\n") {
+		t.Fatalf("expected notification to use multiline format, got %q", notifier.messages[0])
+	}
+}
+
+func TestReconcile_DoesNotNotifyWhenNothingChanged(t *testing.T) {
+	repoDir := setupRepoDir(t, "nginx")
+	compose := &fakeCompose{}
+	notifier := &fakeNotifier{}
+	rec := newTestReconcilerWithNotifier(repoDir, compose, newTestStateStore(t), notifier)
+
+	if _, err := rec.Reconcile(context.Background(), nil, nil); err != nil {
+		t.Fatalf("first Reconcile() error = %v", err)
+	}
+	if _, err := rec.Reconcile(context.Background(), nil, nil); err != nil {
+		t.Fatalf("second Reconcile() error = %v", err)
+	}
+	if notifier.count() != 1 {
+		t.Fatalf("expected notification count to stay at 1, got %d", notifier.count())
+	}
+}
+
+func TestReconcile_NotificationIncludesFailedAndRemovedStackNames(t *testing.T) {
+	repoDir := setupRepoDir(t, "nginx")
+	compose := &fakeCompose{upErrByName: map[string]error{"nginx": os.ErrPermission}}
+	notifier := &fakeNotifier{}
+	rec := newTestReconcilerWithNotifier(repoDir, compose, newTestStateStore(t), notifier)
+
+	if _, err := rec.Reconcile(context.Background(), []string{"old-stack"}, nil); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if notifier.count() != 1 {
+		t.Fatalf("expected 1 notification, got %d", notifier.count())
+	}
+	message := notifier.messages[0]
+	if !strings.Contains(message, "Removed: old-stack") {
+		t.Fatalf("expected notification to include removed stack name, got %q", message)
+	}
+	if !strings.Contains(message, "Failed: nginx") {
+		t.Fatalf("expected notification to include failed stack name, got %q", message)
+	}
+}
+
+func TestReconcile_NotifiesWhenOnlyFailuresOccur(t *testing.T) {
+	repoDir := setupRepoDir(t, "nginx")
+	compose := &fakeCompose{upErrByName: map[string]error{"nginx": os.ErrPermission}}
+	notifier := &fakeNotifier{}
+	rec := newTestReconcilerWithNotifier(repoDir, compose, newTestStateStore(t), notifier)
+
+	result, err := rec.Reconcile(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if !result.Changed() {
+		t.Fatal("expected failure-only reconcile result to report changes")
+	}
+	if notifier.count() != 1 {
+		t.Fatalf("expected 1 notification, got %d", notifier.count())
+	}
+	if !strings.Contains(notifier.messages[0], "Failed: nginx") {
+		t.Fatalf("expected failure-only notification to include failed stack name, got %q", notifier.messages[0])
 	}
 }

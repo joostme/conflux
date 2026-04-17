@@ -13,6 +13,7 @@ import (
 	"github.com/joostme/conflux/internal/docker"
 	"github.com/joostme/conflux/internal/git"
 	"github.com/joostme/conflux/internal/networks"
+	"github.com/joostme/conflux/internal/notify"
 	"github.com/joostme/conflux/internal/reconciler"
 )
 
@@ -25,6 +26,7 @@ type appConfig struct {
 	RepoDir      string        `env:"CONFLUX_REPO_DIR"         envDefault:"/data/repo"`
 	ConfigFile   string        `env:"CONFLUX_CONFIG_FILE"      envDefault:"conflux.yaml"`
 	LogLevel     string        `env:"CONFLUX_LOG_LEVEL"        envDefault:"info"`
+	NotifyURLs   string        `env:"CONFLUX_NOTIFY_URLS"`
 }
 
 // slogLevel converts the string log level to a slog.Level.
@@ -70,8 +72,19 @@ func main() {
 	}
 	defer func() { _ = dockerClient.Close() }()
 
+	notifier, err := notify.New(cfg.NotifyURLs)
+	if err != nil {
+		slog.Error("failed to create notification sender", "error", err)
+		os.Exit(1)
+	}
+
 	networkMgr := networks.NewManager(dockerClient.APIClient())
-	rec := reconciler.New(cfg.RepoDir, cfg.ConfigFile, dockerClient, networkMgr)
+	rec := reconciler.New(cfg.RepoDir, cfg.ConfigFile, dockerClient, networkMgr, func(ctx context.Context, message string, params map[string]string) error {
+		if notifier == nil {
+			return nil
+		}
+		return notifier.Send(ctx, message, params)
+	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
