@@ -6,36 +6,141 @@
 
 Docker Compose GitOps — auto-deploy compose stacks from a git repo.
 
-Conflux is a lightweight GitOps controller for Docker Compose. It polls a git repository, discovers compose stacks, decrypts secrets with SOPS+AGE, fingerprints each stack's desired state, and only runs `docker compose up -d` when that stack has changed. Think of it as Flux CD for your homelab.
+Conflux polls a git repository, discovers Docker Compose stacks, decrypts SOPS-encrypted secrets, and runs `docker compose up -d` only for stacks whose desired state has changed.
 
-> **conflux** *(noun)* — from Latin *confluere*, "to flow together." A place where streams merge.
-> Conflux is where your git repo and Docker Compose stacks flow together.
+## Features
 
-## How It Works
+- **GitOps via polling** — no webhooks, no exposed ports
+- **Per-stack fingerprinting** — only changed stacks redeploy
+- **SOPS + AGE secrets** — encrypted at rest, decrypted in memory
+- **Layered env/secret merging** — global + per-stack with `${VAR}` substitution
+- **Managed Docker networks** — pre-create shared networks before stacks deploy
+- **Notifications** — Shoutrrr-powered alerts on changes
+- **Auto-prune** — optional cleanup of unused images, volumes, and networks
+- **SSH git auth via [go-git](https://github.com/go-git/go-git)** — no git CLI required
+
+## Quick Start
+
+### 1. Lay out your infra repo
 
 ```
-┌─────────────┐     poll      ┌──────────┐    discover    ┌────────────────┐
-│  Git Repo   │◄──────────────│ Conflux  │───────────────►│ Stack: whoami  │
-│             │               │          │                │ Stack: nginx   │
-│ conflux.yaml│  clone/pull   │ decrypt  │  compose up    │ Stack: ...     │
-│ stacks/     │──────────────►│ secrets  │───────────────►│                │
-└─────────────┘               └──────────┘                └────────────────┘
+my-infra/
+├── conflux.yaml
+└── stacks/
+    └── whoami/
+        └── compose.yaml
 ```
 
-1. **Poll** — Fetches the configured git branch on a regular interval
-2. **Detect** — Compares local vs remote HEAD to detect changes
-3. **Parse** — Reads `conflux.yaml` from the repo root
-4. **Networks** — Ensures global Docker networks exist (skips existing ones)
-5. **Decrypt** — Decrypts secret files in memory using SOPS with AGE keys
-6. **Discover** — Scans the stacks directory for compose files
-7. **Deploy** — Runs `docker compose up -d --remove-orphans` only for stacks whose compose file or resolved env changed
-8. **Cleanup** — Tears down stacks that were removed from the repo
-9. **State** — Stores last-applied stack fingerprints in `/data/reconcile-state.json`
-10. **Prune** — Optionally prunes unused Docker images, volumes, and networks after a fully successful deploy cycle
+`conflux.yaml`:
 
-## Configuration
+```yaml
+stacks:
+  directory: stacks
+  file: compose.yaml
+```
 
-### Environment Variables
+`stacks/whoami/compose.yaml`:
+
+```yaml
+services:
+  whoami:
+    image: traefik/whoami
+    ports:
+      - "8080:80"
+```
+
+Push it to a git remote.
+
+### 2. Run Conflux
+
+```yaml
+services:
+  conflux:
+    image: ghcr.io/joostme/conflux:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - conflux-data:/data
+      - ~/.ssh/id_ed25519:/ssh.key:ro
+    environment:
+      CONFLUX_GIT_URL: git@github.com:you/my-infra.git
+      CONFLUX_GIT_KEY: /ssh.key
+      CONFLUX_POLL_INTERVAL: 60s
+
+volumes:
+  conflux-data:
+```
+
+`docker compose up -d` — Conflux clones your repo and deploys `whoami`.
+
+### 3. Iterate
+
+Edit `stacks/whoami/compose.yaml` in your infra repo, push, wait for the next poll. Only the changed stack redeploys.
+
+**Next:** [add secrets](#secrets-with-sops--age), [shared networks](#networks), [notifications](#notifications).
+
+## Repository Layout
+
+```
+my-infra/
+├── conflux.yaml            # Conflux config
+├── environment.env         # Global env vars (optional)
+├── secrets.env             # Global secrets, SOPS-encrypted (optional)
+└── stacks/
+    ├── whoami/
+    │   └── compose.yaml
+    ├── nginx/
+    │   ├── compose.yaml
+    │   └── environment.env # Stack-level env (optional)
+    └── postgres/
+        ├── compose.yaml
+        ├── environment.env
+        └── secrets.env     # Stack-level secrets (optional)
+```
+
+Each subdirectory under `stacks/` containing the configured compose file is one stack. Stacks added or removed from the repo are deployed or torn down on the next reconcile.
+
+## `conflux.yaml`
+
+Full annotated example:
+
+```yaml
+global:
+  secrets:
+    - secrets.env             # SOPS-encrypted, decrypted at runtime
+  environment:
+    - environment.env         # Plain-text env vars
+
+networks:
+  proxy:
+    driver: bridge
+    attachable: true
+  internal:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1
+
+stacks:
+  directory: stacks           # Where to find stack subdirectories
+  file: compose.yaml          # Compose filename in each stack
+  parallel_deploy: 1          # Stacks deployed concurrently
+  auto_prune: false           # Prune unused docker resources after a clean reconcile
+  secrets:                    # Default per-stack secret filenames
+    - secrets.env
+  environment:                # Default per-stack env filenames
+    - environment.env
+```
+
+The repo includes a [JSON schema](conflux.schema.json) for editor autocomplete:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/joostme/conflux/main/conflux.schema.json
+```
+
+## Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
@@ -46,84 +151,82 @@ Conflux is a lightweight GitOps controller for Docker Compose. It polls a git re
 | `SOPS_AGE_KEY_FILE` | | Path to AGE key file for secret decryption |
 | `CONFLUX_REPO_DIR` | `/data/repo` | Where to clone the repository |
 | `CONFLUX_CONFIG_FILE` | `conflux.yaml` | Config filename in repo root |
-| `CONFLUX_STATE_FILE` | `/data/reconcile-state.json` | Where to persist stack fingerprint state |
-| `CONFLUX_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `CONFLUX_NOTIFY_URLS` | | Comma-separated or newline-separated [Shoutrrr](https://containrrr.dev/shoutrrr/latest/) URLs for notifications when a reconcile changes anything |
+| `CONFLUX_STATE_FILE` | `/data/reconcile-state.json` | Where stack fingerprints are persisted |
+| `CONFLUX_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `CONFLUX_NOTIFY_URLS` | | Comma- or newline-separated [Shoutrrr](https://containrrr.dev/shoutrrr/latest/) URLs |
 
-By default, Conflux stores reconcile state in `/data/reconcile-state.json` so stack fingerprints survive container restarts when `/data` is backed by a persistent volume. Override `CONFLUX_STATE_FILE` if you want to store that state somewhere else, such as when running the binary outside the container example layout.
+## Environment & Secret Merging
 
-When `CONFLUX_NOTIFY_URLS` is set, Conflux sends a notification after a reconcile only if it actually changed something: at least one stack was deployed, or a managed stack/network was removed. This is configured at the container level, so it fits naturally in your `docker-compose.yml`.
+For each stack, all env and secret files are merged into a **single resolved env file** passed to `docker compose up` as `--env-file`.
 
-Examples:
+**Merge order (last wins):**
 
-```yaml
-environment:
-  CONFLUX_NOTIFY_URLS: >-
-    telegram://BOT_TOKEN@telegram?channels=@mychannel,
-    discord://TOKEN@CHANNEL_ID
-```
+1. Global environment files
+2. Global secret files (SOPS-decrypted)
+3. Stack environment files
+4. Stack secret files
 
-or with an env file:
+Variables can reference earlier-defined variables with `${VAR}`:
 
 ```env
-CONFLUX_NOTIFY_URLS=telegram://BOT_TOKEN@telegram?channels=@mychannel,discord://TOKEN@CHANNEL_ID
+# global secrets.env
+DB_PASSWORD=hunter2
+
+# stacks/myapp/environment.env
+DATABASE_URL=postgres://app:${DB_PASSWORD}@db:5432/mydb
 ```
 
-### Config File (`conflux.yaml`)
+Undefined references expand to empty strings.
 
-Place this in the root of your git repository:
+**Fingerprinting:** Conflux hashes each stack's compose file plus its resolved env. If the hash matches the last successful apply, `docker compose up` is skipped.
+
+## Secrets with SOPS + AGE
+
+[SOPS](https://github.com/getsops/sops) encrypts files using [AGE](https://github.com/FiloSottile/age) keys. Conflux decrypts them in memory at reconcile time — encrypted files stay encrypted on disk and in git.
+
+### Generate a key
+
+```bash
+age-keygen -o age.key
+# Public key: age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+### Encrypt a secrets file
+
+```bash
+sops --encrypt --age age1xxxxxxxx --in-place secrets.env
+```
+
+Commit the encrypted file. Keep `age.key` out of git.
+
+### Mount the key
 
 ```yaml
-global:
-    secrets:
-        - secrets.env             # SOPS-encrypted, decrypted at runtime
-    environment:
-        - environment.env       # Plain-text env vars
-
-networks:
-    proxy:
-        driver: bridge
-        attachable: true
-    internal:
-        driver: bridge
-        internal: true
-        ipam:
-            config:
-                - subnet: 172.28.0.0/16
-                  gateway: 172.28.0.1
-
-stacks:
-    directory: stacks           # Where to find stack subdirectories
-    file: compose.yaml          # Compose filename to look for in each stack
-    parallel_deploy: 1          # Number of stacks to deploy concurrently
-    auto_prune: false           # Prune unused Docker images, volumes, and networks after a fully successful reconcile
-    secrets:                    # Default per-stack secret filenames
-        - secrets.env
-    environment:                # Default per-stack env filenames
-        - environment.env
+volumes:
+  - ./age.key:/age.key:ro
+environment:
+  SOPS_AGE_KEY_FILE: /age.key
 ```
 
-When `stacks.auto_prune: true`, Conflux runs Docker's daemon-wide prune APIs after a reconcile only if at least one `docker compose up` succeeded and no stack deployments failed. This includes named volumes so stale compose volumes are reclaimed too.
+Global secrets live at the repo root and apply to every stack. Stack-level secrets live next to the compose file and override globals on key conflict.
 
-### Networks
+## Networks
 
-The `networks` section lets you pre-create Docker networks before any stacks are deployed. This is useful for shared networks (e.g. a reverse proxy network) that multiple stacks connect to.
-
-Networks support the full set of Docker compose network options:
+Pre-create networks under `networks:` in `conflux.yaml`. They're ensured before any stacks deploy. Existing networks with the same name are left untouched.
 
 | Field | Type | Description |
 |---|---|---|
-| `name` | string | Custom name (defaults to the map key) |
-| `driver` | string | Network driver (`bridge`, `overlay`, etc.) |
+| `name` | string | Custom name (defaults to map key) |
+| `driver` | string | `bridge`, `overlay`, etc. |
 | `driver_opts` | map | Driver-specific options |
 | `enable_ipv4` | bool | Enable/disable IPv4 |
 | `enable_ipv6` | bool | Enable/disable IPv6 |
 | `internal` | bool | Restrict external access |
 | `attachable` | bool | Allow manual container attachment |
 | `labels` | map | Metadata labels |
-| `ipam` | object | IP address management config |
+| `ipam` | object | IP address management |
 
-IPAM configuration:
+IPAM example:
 
 ```yaml
 networks:
@@ -140,145 +243,33 @@ networks:
         foo: bar
 ```
 
-**Behavior:** On each reconcile, Conflux checks if a network with the same name already exists. If it does, the network is skipped (not recreated or modified). If it doesn't exist, it's created with the full set of configured options. Networks are always ensured *before* any stacks are deployed.
+## Notifications
 
-### Repository Structure
-
-```
-my-infra-repo/
-├── conflux.yaml            # Conflux configuration
-├── environment.env         # Global env vars (applied to all stacks)
-├── secrets.env             # Global secrets (SOPS-encrypted)
-└── stacks/
-    ├── whoami/
-    │   └── compose.yaml
-    ├── nginx/
-    │   ├── compose.yaml
-    │   └── environment.env # Stack-level env (additive, overrides globals on conflict)
-    └── postgres/
-        ├── compose.yaml
-        ├── environment.env # Stack-level env (additive, overrides globals on conflict)
-        └── secrets.env     # Stack-level secrets (additive, highest priority)
-```
-
-### Environment & Secret Handling
-
-For each stack, Conflux collects all environment and secret files, decrypts secrets in memory with SOPS+AGE, and merges everything into a **single resolved env file**. Variables defined in later sources override earlier ones (last wins). The merged file also supports `${VAR}` substitution — any variable can reference a variable defined earlier in the merge order.
-
-Before deploying, Conflux hashes the stack's compose file plus the resolved env content and compares that fingerprint with the last successful apply stored in `/data/reconcile-state.json`. If the fingerprint is unchanged, the stack is skipped and `docker compose up` is not run.
-
-**Merge order (last wins):**
-
-1. **Global environment files** — plain-text, always applied
-2. **Global secret files** — SOPS-encrypted, decrypted at runtime, override global env on conflict
-3. **Stack environment files** — if present, override globals on conflict
-4. **Stack secret files** — if present, highest priority
-
-**Variable substitution:**
-
-Variables can reference other variables using `${VAR}` syntax. References are resolved against all variables collected up to that point in the merge order. For example, a global secret can define `DB_PASSWORD=hunter2`, and a stack env file can use it:
-
-```env
-# stacks/myapp/environment.env
-DATABASE_URL=postgres://app:${DB_PASSWORD}@db:5432/mydb
-```
-
-Undefined references expand to an empty string.
-
-Global files are **always** included. Stack-level files don't replace them — they are merged after globals, so they take priority for any overlapping variable names. The single resolved file is passed as `--env-file` to `docker compose up` when a stack fingerprint changes.
-
-## SOPS + AGE Setup
-
-### Generate an AGE key pair
-
-```bash
-age-keygen -o age.key
-# Public key: age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-### Encrypt a secrets file
-
-```bash
-sops --encrypt --age age1xxxxxxxx --in-place secrets.env
-```
-
-### Provide the key to Conflux
-
-Mount the key file into the container and set `SOPS_AGE_KEY_FILE`:
-
-```bash
-docker run -v /path/to/age.key:/age.key:ro \
-  -e SOPS_AGE_KEY_FILE=/age.key \
-  ...
-```
-
-## Running Conflux
-
-### Docker Run
-
-```bash
-docker run -d \
-  --name conflux \
-  --restart unless-stopped \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v conflux-data:/data \
-  -v /path/to/age.key:/age.key:ro \
-  -v /path/to/ssh-key:/ssh.key:ro \
-  -e CONFLUX_GIT_URL=git@github.com:yourorg/infra.git \
-  -e CONFLUX_GIT_BRANCH=main \
-  -e CONFLUX_GIT_KEY=/ssh.key \
-  -e SOPS_AGE_KEY_FILE=/age.key \
-  -e CONFLUX_POLL_INTERVAL=60s \
-  conflux
-```
-
-### Docker Compose
+Set `CONFLUX_NOTIFY_URLS` to one or more [Shoutrrr](https://containrrr.dev/shoutrrr/latest/) URLs. Notifications fire only when a reconcile actually changes something — a stack deployed, removed, or a network removed.
 
 ```yaml
-services:
-  conflux:
-    image: conflux
-    build: .
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - conflux-data:/data
-      - ./age.key:/age.key:ro
-      - ~/.ssh/id_ed25519:/ssh.key:ro
-    environment:
-      CONFLUX_GIT_URL: git@github.com:yourorg/infra.git
-      CONFLUX_GIT_BRANCH: main
-      CONFLUX_GIT_KEY: /ssh.key
-      SOPS_AGE_KEY_FILE: /age.key
-      CONFLUX_POLL_INTERVAL: 60s
-      CONFLUX_NOTIFY_URLS: >-
-        telegram://BOT_TOKEN@telegram?channels=@mychannel,
-        discord://TOKEN@CHANNEL_ID
-
-volumes:
-  conflux-data:
+environment:
+  CONFLUX_NOTIFY_URLS: >-
+    telegram://BOT_TOKEN@telegram?channels=@mychannel,
+    discord://TOKEN@CHANNEL_ID
 ```
 
-## Releases
+Or via env file:
 
-Container images are published to GHCR from GitHub Actions for `linux/amd64` and `linux/arm64`.
-
-Changesets manages the changelog and release versioning:
-
-```bash
-npx changeset
+```env
+CONFLUX_NOTIFY_URLS=telegram://BOT_TOKEN@telegram?channels=@mychannel,discord://TOKEN@CHANNEL_ID
 ```
 
-Merge the generated changeset with your change. The release workflow will open a release PR that updates `package.json` and `CHANGELOG.md`, and merging that PR publishes a tagged GitHub release plus these image tags:
+## Operations
 
-- `ghcr.io/joostme/conflux:vX.Y.Z`
-- `ghcr.io/joostme/conflux:vX.Y`
-- `ghcr.io/joostme/conflux:latest`
+**State.** Stack fingerprints are persisted to `CONFLUX_STATE_FILE` (default `/data/reconcile-state.json`). Mount `/data` as a volume so state survives restarts.
 
-## Design Decisions
+**Logging.** Set `CONFLUX_LOG_LEVEL=debug` to see fingerprint comparisons and merged env contents.
 
-- **Minimal reconciliation** — Conflux fingerprints each stack's compose file and resolved env, skips unchanged stacks, and still relies on `docker compose up -d` to apply real changes.
-- **Git polling, not webhooks** — No need to expose ports or configure webhook endpoints. Works behind NATs and firewalls.
-- **Native git via go-git** — Uses [go-git](https://github.com/go-git/go-git) for all git operations (clone, fetch, reset). No git CLI dependency at runtime. SSH key auth is handled natively.
-- **Stack-level overrides are additive** — Global env/secret files are always included. All sources are merged into a single resolved env file with `${VAR}` expansion and last-wins semantics.
-- **Errors don't cascade** — A failure in one stack doesn't prevent other stacks from deploying.
+**Auto-prune.** Set `stacks.auto_prune: true` in `conflux.yaml` to run Docker's daemon-wide prune (images, volumes, networks) after a reconcile. Prune only runs when at least one `docker compose up` succeeded *and* no stack failed.
+
+**Image tags.** Images are published to GHCR for `linux/amd64` and `linux/arm64`:
+
+- `ghcr.io/joostme/conflux:vX.Y.Z` — pinned patch
+- `ghcr.io/joostme/conflux:vX.Y` — pinned minor
+- `ghcr.io/joostme/conflux:latest` — rolling
