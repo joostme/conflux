@@ -4,6 +4,12 @@
   <img src="assets/icon.svg" alt="Conflux Icon" width="200"/>
 </p>
 
+<p align="center">
+  <a href="https://github.com/joostme/conflux/actions/workflows/ci.yml"><img src="https://github.com/joostme/conflux/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
+  <a href="https://github.com/joostme/conflux/releases"><img src="https://img.shields.io/github/v/release/joostme/conflux?sort=semver" alt="Release"/></a>
+  <a href="https://github.com/joostme/conflux/pkgs/container/conflux"><img src="https://img.shields.io/badge/ghcr.io-joostme%2Fconflux-blue?logo=docker" alt="GHCR"/></a>
+</p>
+
 Docker Compose GitOps — auto-deploy compose stacks from a git repo.
 
 Conflux polls a git repository, discovers Docker Compose stacks, decrypts SOPS-encrypted secrets, and runs `docker compose up -d` only for stacks whose desired state has changed.
