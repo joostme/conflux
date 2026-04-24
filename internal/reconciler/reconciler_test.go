@@ -13,10 +13,12 @@ import (
 )
 
 type fakeCompose struct {
-	mu          sync.Mutex
-	upCalls     []string
-	downCalls   []string
-	upErrByName map[string]error
+	mu                sync.Mutex
+	upCalls           []string
+	downCalls         []string
+	validateCalls     []string
+	upErrByName       map[string]error
+	validateErrByName map[string]error
 }
 
 type fakeNotifier struct {
@@ -44,6 +46,16 @@ func (f *fakeCompose) Up(_ context.Context, stack stacktypes.Stack, _ string) er
 	defer f.mu.Unlock()
 	f.upCalls = append(f.upCalls, stack.Name)
 	if err := f.upErrByName[stack.Name]; err != nil {
+		return err
+	}
+	return nil
+}
+
+func (f *fakeCompose) Validate(_ context.Context, stack stacktypes.Stack, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.validateCalls = append(f.validateCalls, stack.Name)
+	if err := f.validateErrByName[stack.Name]; err != nil {
 		return err
 	}
 	return nil
@@ -86,6 +98,7 @@ func newTestReconciler(repoDir string, compose *fakeCompose, store *reconcilesta
 		repoDir:    repoDir,
 		configFile: "conflux.yaml",
 		state:      store,
+		validate:   compose.Validate,
 		up:         compose.Up,
 		down:       compose.Down,
 		prune: func(context.Context) error {
@@ -377,6 +390,54 @@ func TestReconcile_SkipsUnchangedStacks(t *testing.T) {
 	}
 	if compose.upCount("nginx") != 1 {
 		t.Fatalf("expected unchanged stack to be skipped, got %d deploys", compose.upCount("nginx"))
+	}
+}
+
+func TestValidate_SendsNotificationForInvalidStack(t *testing.T) {
+	repoDir := setupRepoDir(t, "nginx", "redis")
+	compose := &fakeCompose{
+		validateErrByName: map[string]error{"nginx": os.ErrInvalid},
+	}
+	notifier := &fakeNotifier{}
+	rec := newTestReconcilerWithNotifier(repoDir, compose, newTestStateStore(t), notifier)
+
+	err := rec.Validate(context.Background())
+	if err == nil {
+		t.Fatal("expected Validate() to fail, got nil")
+	}
+	if notifier.count() != 1 {
+		t.Fatalf("expected 1 notification, got %d", notifier.count())
+	}
+	if !strings.Contains(notifier.messages[0], "Conflux validation failed") {
+		t.Fatalf("expected validation failure notification, got %q", notifier.messages[0])
+	}
+	if !strings.Contains(notifier.messages[0], "Stacks: nginx") {
+		t.Fatalf("expected failed stack in notification, got %q", notifier.messages[0])
+	}
+	if compose.upCount("nginx") != 0 || compose.upCount("redis") != 0 {
+		t.Fatal("validation should not deploy stacks")
+	}
+}
+
+func TestValidate_SendsGeneralNotificationForConfigError(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, "conflux.yaml"), []byte("{{invalid"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	compose := &fakeCompose{}
+	notifier := &fakeNotifier{}
+	rec := newTestReconcilerWithNotifier(repoDir, compose, newTestStateStore(t), notifier)
+
+	err := rec.Validate(context.Background())
+	if err == nil {
+		t.Fatal("expected Validate() to fail, got nil")
+	}
+	if notifier.count() != 1 {
+		t.Fatalf("expected 1 notification, got %d", notifier.count())
+	}
+	if !strings.Contains(notifier.messages[0], "Error: loading config") {
+		t.Fatalf("expected general validation error in notification, got %q", notifier.messages[0])
 	}
 }
 

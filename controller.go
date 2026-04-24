@@ -2,17 +2,32 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/joostme/conflux/internal/git"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/joostme/conflux/internal/reconciler"
 )
 
 // Controller orchestrates the git-poll → snapshot → diff → reconcile loop.
 type Controller struct {
-	repo *git.Repo
-	rec  *reconciler.Reconciler
+	repo             gitRepo
+	rec              reconcilerClient
+	lastRejectedHash *plumbing.Hash
+}
+
+type gitRepo interface {
+	CloneOrOpen() (bool, error)
+	Fetch() (*plumbing.Hash, error)
+	Head() (plumbing.Hash, error)
+	Reset(plumbing.Hash) error
+}
+
+type reconcilerClient interface {
+	Validate(context.Context) error
+	Reconcile(context.Context, []string, []string) (reconciler.Result, error)
+	Snapshot() (map[string]bool, map[string]bool, error)
 }
 
 // InitialSync performs the first-run synchronisation. On a fresh clone it
@@ -27,6 +42,9 @@ func (c *Controller) InitialSync(ctx context.Context) error {
 
 	if freshClone {
 		slog.Info("fresh clone, deploying all stacks")
+		if err := c.rec.Validate(ctx); err != nil {
+			return err
+		}
 		_, err := c.rec.Reconcile(ctx, nil, nil)
 		return err
 	}
@@ -59,8 +77,6 @@ func (c *Controller) RunLoop(ctx context.Context, interval time.Duration) {
 // When ensureRunning is false, reconciliation is skipped if there are no
 // remote changes, avoiding unnecessary docker compose calls on every poll.
 func (c *Controller) fetchAndReconcile(ctx context.Context, ensureRunning bool) error {
-	before := c.snapshotState()
-
 	remoteHash, err := c.repo.Fetch()
 	if err != nil {
 		return err
@@ -71,13 +87,38 @@ func (c *Controller) fetchAndReconcile(ctx context.Context, ensureRunning bool) 
 			return nil
 		}
 		slog.Info("no changes detected, reconciling to ensure all stacks are running")
+		if err := c.rec.Validate(ctx); err != nil {
+			return err
+		}
 		_, err := c.rec.Reconcile(ctx, nil, nil)
+		return err
+	}
+
+	if c.lastRejectedHash != nil && *c.lastRejectedHash == *remoteHash {
+		slog.Info("remote commit previously failed validation, skipping", "commit", remoteHash.String()[:12])
+		return nil
+	}
+
+	before := c.snapshotState()
+
+	previousHash, err := c.repo.Head()
+	if err != nil {
 		return err
 	}
 
 	if err := c.repo.Reset(*remoteHash); err != nil {
 		return err
 	}
+
+	if err := c.rec.Validate(ctx); err != nil {
+		rejectedHash := *remoteHash
+		c.lastRejectedHash = &rejectedHash
+		if resetErr := c.repo.Reset(previousHash); resetErr != nil {
+			return fmt.Errorf("validation failed: %w; restoring previous checkout: %v", err, resetErr)
+		}
+		return err
+	}
+	c.lastRejectedHash = nil
 
 	after := c.snapshotState()
 	removedStacks := diffNames(before.stacks, after.stacks)

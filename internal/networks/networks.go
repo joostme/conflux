@@ -90,6 +90,18 @@ func ResolveNames(networks map[string]config.NetworkConfig) map[string]bool {
 	return names
 }
 
+// Validate parses configured networks without creating them, catching invalid
+// IPAM and Docker option combinations before a reconcile run mutates the host.
+func Validate(networks map[string]config.NetworkConfig) error {
+	for key, cfg := range networks {
+		name := ResolveName(key, cfg)
+		if _, err := buildCreateOptions(cfg); err != nil {
+			return fmt.Errorf("network %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // listExistingNames returns a set of all network names on the host.
 func listExistingNames(ctx context.Context, cli dockerclient.APIClient) (map[string]bool, error) {
 	result, err := cli.NetworkList(ctx, dockerclient.NetworkListOptions{})

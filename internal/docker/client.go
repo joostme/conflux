@@ -54,6 +54,19 @@ type ComposeClient struct {
 	service api.Compose
 }
 
+func projectLoadOptions(stack stacks.Stack, envFile string) api.ProjectLoadOptions {
+	options := api.ProjectLoadOptions{
+		ProjectName: stack.Name,
+		ConfigPaths: []string{stack.ComposeFile},
+		WorkingDir:  stack.Dir,
+	}
+	if envFile != "" {
+		options.EnvFiles = []string{envFile}
+	}
+
+	return options
+}
+
 // Up loads the compose project and runs the equivalent of `docker compose up -d --remove-orphans`.
 func (c *ComposeClient) Up(ctx context.Context, stack stacks.Stack, envFile string) error {
 	slog.Info("deploying stack",
@@ -62,12 +75,7 @@ func (c *ComposeClient) Up(ctx context.Context, stack stacks.Stack, envFile stri
 		"env_file", envFile,
 	)
 
-	project, err := c.service.LoadProject(ctx, api.ProjectLoadOptions{
-		ProjectName: stack.Name,
-		ConfigPaths: []string{stack.ComposeFile},
-		WorkingDir:  stack.Dir,
-		EnvFiles:    []string{envFile},
-	})
+	project, err := c.service.LoadProject(ctx, projectLoadOptions(stack, envFile))
 	if err != nil {
 		return fmt.Errorf("loading project %s: %w", stack.Name, err)
 	}
@@ -83,6 +91,18 @@ func (c *ComposeClient) Up(ctx context.Context, stack stacks.Stack, envFile stri
 	}
 
 	slog.Info("stack deployed successfully", "stack", stack.Name)
+	return nil
+}
+
+// Validate loads the compose project without applying any changes.
+func (c *ComposeClient) Validate(ctx context.Context, stack stacks.Stack, envFile string) error {
+	slog.Info("validating stack", "stack", stack.Name, "compose", stack.ComposeFile, "env_file", envFile)
+
+	if _, err := c.service.LoadProject(ctx, projectLoadOptions(stack, envFile)); err != nil {
+		return fmt.Errorf("loading project %s: %w", stack.Name, err)
+	}
+
+	slog.Info("stack validation succeeded", "stack", stack.Name)
 	return nil
 }
 

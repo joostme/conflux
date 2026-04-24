@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -25,6 +26,7 @@ type Reconciler struct {
 	configFile string
 	networks   *networks.Manager
 	state      *reconcilestate.Store
+	validate   func(context.Context, stacks.Stack, string) error
 	up         func(context.Context, stacks.Stack, string) error
 	down       func(context.Context, string) error
 	prune      func(context.Context) error
@@ -41,6 +43,24 @@ type Result struct {
 	RemovedStacks   int
 	RemovedStackIDs []string
 	RemovedNetworks int
+}
+
+// ValidationError reports a repo state that was rejected before reconcile.
+type ValidationError struct {
+	Summary      string
+	FailedStacks []string
+	Err          error
+}
+
+func (e *ValidationError) Error() string {
+	if len(e.FailedStacks) == 0 {
+		return fmt.Sprintf("%s: %v", e.Summary, e.Err)
+	}
+	return fmt.Sprintf("%s for stacks %s: %v", e.Summary, strings.Join(e.FailedStacks, ", "), e.Err)
+}
+
+func (e *ValidationError) Unwrap() error {
+	return e.Err
 }
 
 func recordStackName(mu *sync.Mutex, names *[]string, name string) {
@@ -82,12 +102,83 @@ func New(repoDir, configFile string, dockerClient *docker.Client, networkSvc *ne
 		notify:     notify,
 	}
 	if dockerClient != nil {
+		rec.validate = dockerClient.Compose().Validate
 		rec.up = dockerClient.Compose().Up
 		rec.down = dockerClient.Compose().Down
 		rec.prune = dockerClient.Prune
 	}
 
 	return rec
+}
+
+// Validate checks whether the current repo state can be reconciled safely.
+func (r *Reconciler) Validate(ctx context.Context) error {
+	slog.Info("starting validation")
+
+	cfg, err := config.Load(r.repoDir, r.configFile)
+	if err != nil {
+		return r.reportValidationFailure(ctx, "loading config", nil, err)
+	}
+
+	envResolver, err := envfiles.NewResolver(r.repoDir, cfg)
+	if err != nil {
+		return r.reportValidationFailure(ctx, "resolving global env files", nil, err)
+	}
+	defer func() {
+		if err := envResolver.Cleanup(); err != nil {
+			slog.Warn("failed to clean up env temp files", "error", err)
+		}
+	}()
+
+	if err := networks.Validate(cfg.Networks); err != nil {
+		return r.reportValidationFailure(ctx, "validating networks", nil, err)
+	}
+
+	discovered, err := stacks.Discover(r.repoDir, cfg)
+	if err != nil {
+		return r.reportValidationFailure(ctx, "discovering stacks", nil, err)
+	}
+	if len(discovered) > 0 && r.validate == nil {
+		return r.reportValidationFailure(ctx, "validating stack definitions", nil, fmt.Errorf("docker client not configured"))
+	}
+
+	var validationErrs []error
+	var failedStacks []string
+	for _, stack := range discovered {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		resolvedEnv, err := envResolver.ResolveForStack(stack.Dir, cfg.Stacks)
+		if err != nil {
+			slog.Error("failed to resolve env file during validation", "stack", stack.Name, "error", err)
+			failedStacks = append(failedStacks, stack.Name)
+			validationErrs = append(validationErrs, fmt.Errorf("stack %s env resolution: %w", stack.Name, err))
+			continue
+		}
+
+		envFile, err := envResolver.FileFromContent(resolvedEnv.Content)
+		if err != nil {
+			slog.Error("failed to prepare env file during validation", "stack", stack.Name, "error", err)
+			failedStacks = append(failedStacks, stack.Name)
+			validationErrs = append(validationErrs, fmt.Errorf("stack %s env file: %w", stack.Name, err))
+			continue
+		}
+
+		if err := r.validate(ctx, stack, envFile); err != nil {
+			slog.Error("stack validation failed", "stack", stack.Name, "error", err)
+			failedStacks = append(failedStacks, stack.Name)
+			validationErrs = append(validationErrs, fmt.Errorf("stack %s: %w", stack.Name, err))
+		}
+	}
+
+	if len(validationErrs) > 0 {
+		sort.Strings(failedStacks)
+		return r.reportValidationFailure(ctx, "validating stack definitions", failedStacks, errors.Join(validationErrs...))
+	}
+
+	slog.Info("validation complete", "stacks", len(discovered), "networks", len(cfg.Networks))
+	return nil
 }
 
 // Reconcile performs a full reconciliation cycle:
@@ -329,6 +420,34 @@ func (r *Reconciler) notifyChanged(ctx context.Context, result Result) {
 	params := map[string]string{"title": "Conflux run changed"}
 	if err := r.notify(ctx, result.notificationMessage(), params); err != nil {
 		slog.Warn("failed to send notification", "error", err)
+	}
+}
+
+func (r *Reconciler) reportValidationFailure(ctx context.Context, summary string, failedStacks []string, err error) error {
+	validationErr := &ValidationError{
+		Summary:      summary,
+		FailedStacks: append([]string(nil), failedStacks...),
+		Err:          err,
+	}
+	r.notifyValidationFailed(ctx, validationErr)
+	return validationErr
+}
+
+func (r *Reconciler) notifyValidationFailed(ctx context.Context, err *ValidationError) {
+	if r.notify == nil {
+		return
+	}
+
+	lines := []string{"Conflux validation failed"}
+	if len(err.FailedStacks) > 0 {
+		lines = append(lines, fmt.Sprintf("Stacks: %s", strings.Join(err.FailedStacks, ", ")))
+	} else {
+		lines = append(lines, fmt.Sprintf("Error: %s", err.Summary))
+	}
+
+	params := map[string]string{"title": "Conflux validation failed"}
+	if notifyErr := r.notify(ctx, strings.Join(lines, "\n"), params); notifyErr != nil {
+		slog.Warn("failed to send validation notification", "error", notifyErr)
 	}
 }
 

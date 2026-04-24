@@ -63,6 +63,19 @@ func TestResolveNames_NilMap(t *testing.T) {
 	}
 }
 
+func TestValidate_InvalidNetworkConfig(t *testing.T) {
+	err := Validate(map[string]config.NetworkConfig{
+		"proxy": {
+			IPAM: &config.IPAM{
+				Config: []config.IPAMPool{{Subnet: "not-a-cidr"}},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected validation error for invalid network config, got nil")
+	}
+}
+
 func TestConvertIPAM_ValidConfig(t *testing.T) {
 	src := &config.IPAM{
 		Driver: "default",
