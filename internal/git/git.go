@@ -133,6 +133,15 @@ func (r *Repo) Fetch() (*plumbing.Hash, error) {
 	return &remoteHash, nil
 }
 
+// Head returns the current checked-out commit hash.
+func (r *Repo) Head() (plumbing.Hash, error) {
+	head, err := r.repo.Head()
+	if err != nil {
+		return plumbing.ZeroHash, fmt.Errorf("getting HEAD: %w", err)
+	}
+	return head.Hash(), nil
+}
+
 // Reset hard-resets the worktree to the given commit and cleans untracked files.
 func (r *Repo) Reset(hash plumbing.Hash) error {
 	slog.Debug("resetting worktree", "commit", hash.String()[:12])

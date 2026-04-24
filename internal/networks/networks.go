@@ -2,6 +2,7 @@ package networks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -88,6 +89,22 @@ func ResolveNames(networks map[string]config.NetworkConfig) map[string]bool {
 		names[ResolveName(key, cfg)] = true
 	}
 	return names
+}
+
+// Validate parses configured networks without creating them, catching invalid
+// IPAM and Docker option combinations before a reconcile run mutates the host.
+func Validate(networks map[string]config.NetworkConfig) error {
+	var validationErrs []error
+	for key, cfg := range networks {
+		name := ResolveName(key, cfg)
+		if _, err := buildCreateOptions(cfg); err != nil {
+			validationErrs = append(validationErrs, fmt.Errorf("network %s: %w", name, err))
+		}
+	}
+	if len(validationErrs) > 0 {
+		return errors.Join(validationErrs...)
+	}
+	return nil
 }
 
 // listExistingNames returns a set of all network names on the host.

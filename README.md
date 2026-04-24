@@ -17,6 +17,7 @@ Conflux polls a git repository, discovers Docker Compose stacks, decrypts SOPS-e
 ## Features
 
 - **GitOps via polling** — no webhooks, no exposed ports
+- **Pre-reconcile validation** — reject invalid repo changes before touching the host
 - **Per-stack fingerprinting** — only changed stacks redeploy
 - **SOPS + AGE secrets** — encrypted at rest, decrypted in memory
 - **Layered env/secret merging** — global + per-stack with `${VAR}` substitution
@@ -159,7 +160,7 @@ The repo includes a [JSON schema](conflux.schema.json) for editor autocomplete:
 | `CONFLUX_CONFIG_FILE` | `conflux.yaml` | Config filename in repo root |
 | `CONFLUX_STATE_FILE` | `/data/reconcile-state.json` | Where stack fingerprints are persisted |
 | `CONFLUX_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
-| `CONFLUX_NOTIFY_URLS` | | Comma- or newline-separated [Shoutrrr](https://containrrr.dev/shoutrrr/latest/) URLs |
+| `CONFLUX_NOTIFY_URLS` | | Comma- or newline-separated [Shoutrrr](https://containrrr.dev/shoutrrr/latest/) URLs for change and validation-failure notifications |
 
 ## Environment & Secret Merging
 
@@ -251,7 +252,7 @@ networks:
 
 ## Notifications
 
-Set `CONFLUX_NOTIFY_URLS` to one or more [Shoutrrr](https://containrrr.dev/shoutrrr/latest/) URLs. Notifications fire only when a reconcile actually changes something — a stack deployed, removed, or a network removed.
+Set `CONFLUX_NOTIFY_URLS` to one or more [Shoutrrr](https://containrrr.dev/shoutrrr/latest/) URLs. Notifications fire when a reconcile actually changes something — a stack deployed, removed, or a network removed. Conflux also sends a simple notification when a newly detected repo state fails validation before reconcile; detailed validation errors stay in the container logs.
 
 ```yaml
 environment:
