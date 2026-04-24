@@ -28,6 +28,12 @@ type deployCounts struct {
 	skipped  atomic.Int64
 }
 
+type deploySummary struct {
+	deployed int
+	failed   int
+	skipped  int
+}
+
 func (r *Reconciler) prepareReconcile(ctx context.Context) (reconcileSetup, error) {
 	setup := reconcileSetup{}
 
@@ -89,8 +95,9 @@ func (r *Reconciler) ensureNetworks(ctx context.Context, cfg *config.Config) err
 	return nil
 }
 
-func (r *Reconciler) deployStacks(ctx context.Context, setup reconcileSetup, result *Result) (deployCounts, error) {
+func (r *Reconciler) deployStacks(ctx context.Context, setup reconcileSetup, result *Result) (deploySummary, error) {
 	counts := deployCounts{}
+	summary := deploySummary{}
 	var resultMu sync.Mutex
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(setup.cfg.Stacks.ParallelDeploy)
@@ -107,15 +114,19 @@ func (r *Reconciler) deployStacks(ctx context.Context, setup reconcileSetup, res
 			"failed", counts.failed.Load(),
 			"total", len(setup.discovered),
 		)
-		return counts, err
+		return summary, err
 	}
 
-	result.Deployed = int(counts.deployed.Load())
-	result.Failed = int(counts.failed.Load())
-	result.Skipped = int(counts.skipped.Load())
+	summary.deployed = int(counts.deployed.Load())
+	summary.failed = int(counts.failed.Load())
+	summary.skipped = int(counts.skipped.Load())
+
+	result.Deployed = summary.deployed
+	result.Failed = summary.failed
+	result.Skipped = summary.skipped
 	sort.Strings(result.DeployedStacks)
 	sort.Strings(result.FailedStacks)
-	return counts, nil
+	return summary, nil
 }
 
 func (r *Reconciler) deployStack(ctx context.Context, setup reconcileSetup, stack stacks.Stack, result *Result, resultMu *sync.Mutex, counts *deployCounts) error {
@@ -231,22 +242,22 @@ func (r *Reconciler) removeDeletedNetworks(ctx context.Context, removedNetworks 
 	return nil
 }
 
-func (r *Reconciler) finalizeReconcile(ctx context.Context, cfg *config.Config, counts deployCounts, removedStacks, removedNetworks []string, result Result) (Result, error) {
-	failedCount := counts.failed.Load()
+func (r *Reconciler) finalizeReconcile(ctx context.Context, cfg *config.Config, summary deploySummary, removedStacks, removedNetworks []string, result Result) (Result, error) {
+	failedCount := summary.failed
 	if failedCount > 0 {
 		if cfg.Stacks.AutoPrune {
 			slog.Warn("skipping automatic Docker prune because stack deployments failed", "failed", failedCount)
 		}
 		slog.Warn("reconciliation completed with deployment failures",
-			"deployed", counts.deployed.Load(),
-			"skipped", counts.skipped.Load(),
+			"deployed", summary.deployed,
+			"skipped", summary.skipped,
 			"failed", failedCount,
 			"removed_stacks", len(removedStacks),
 			"removed_networks", len(removedNetworks),
 		)
 		slog.Info("reconciliation complete",
-			"deployed", counts.deployed.Load(),
-			"skipped", counts.skipped.Load(),
+			"deployed", summary.deployed,
+			"skipped", summary.skipped,
 			"failed", failedCount,
 			"removed_stacks", len(removedStacks),
 			"removed_networks", len(removedNetworks),
@@ -255,7 +266,7 @@ func (r *Reconciler) finalizeReconcile(ctx context.Context, cfg *config.Config, 
 		return result, nil
 	}
 
-	if counts.deployed.Load() > 0 && cfg.Stacks.AutoPrune {
+	if summary.deployed > 0 && cfg.Stacks.AutoPrune {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -265,9 +276,9 @@ func (r *Reconciler) finalizeReconcile(ctx context.Context, cfg *config.Config, 
 	}
 
 	slog.Info("reconciliation complete",
-		"deployed", counts.deployed.Load(),
-		"skipped", counts.skipped.Load(),
-		"failed", counts.failed.Load(),
+		"deployed", summary.deployed,
+		"skipped", summary.skipped,
+		"failed", summary.failed,
 		"removed_stacks", len(removedStacks),
 		"removed_networks", len(removedNetworks),
 	)
