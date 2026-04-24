@@ -130,51 +130,56 @@ func (r *Reconciler) Validate(ctx context.Context) error {
 		}
 	}()
 
+	var validationErrs []error
+	var failedStacks []string
+
 	if err := networks.Validate(cfg.Networks); err != nil {
-		return r.reportValidationFailure(ctx, "validating networks", nil, err)
+		slog.Error("network validation failed", "error", err)
+		validationErrs = append(validationErrs, fmt.Errorf("validating networks: %w", err))
 	}
 
 	discovered, err := stacks.Discover(r.repoDir, cfg)
 	if err != nil {
-		return r.reportValidationFailure(ctx, "discovering stacks", nil, err)
+		slog.Error("stack discovery failed", "error", err)
+		validationErrs = append(validationErrs, fmt.Errorf("discovering stacks: %w", err))
+	} else if len(discovered) > 0 && r.validate == nil {
+		slog.Error("stack validation unavailable", "error", "docker client not configured")
+		validationErrs = append(validationErrs, fmt.Errorf("validating stack definitions: %w", fmt.Errorf("docker client not configured")))
 	}
-	if len(discovered) > 0 && r.validate == nil {
-		return r.reportValidationFailure(ctx, "validating stack definitions", nil, fmt.Errorf("docker client not configured"))
-	}
 
-	var validationErrs []error
-	var failedStacks []string
-	for _, stack := range discovered {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
+	if r.validate != nil {
+		for _, stack := range discovered {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 
-		resolvedEnv, err := envResolver.ResolveForStack(stack.Dir, cfg.Stacks)
-		if err != nil {
-			slog.Error("failed to resolve env file during validation", "stack", stack.Name, "error", err)
-			failedStacks = append(failedStacks, stack.Name)
-			validationErrs = append(validationErrs, fmt.Errorf("stack %s env resolution: %w", stack.Name, err))
-			continue
-		}
+			resolvedEnv, err := envResolver.ResolveForStack(stack.Dir, cfg.Stacks)
+			if err != nil {
+				slog.Error("failed to resolve env file during validation", "stack", stack.Name, "error", err)
+				failedStacks = append(failedStacks, stack.Name)
+				validationErrs = append(validationErrs, fmt.Errorf("stack %s env resolution: %w", stack.Name, err))
+				continue
+			}
 
-		envFile, err := envResolver.FileFromContent(resolvedEnv.Content)
-		if err != nil {
-			slog.Error("failed to prepare env file during validation", "stack", stack.Name, "error", err)
-			failedStacks = append(failedStacks, stack.Name)
-			validationErrs = append(validationErrs, fmt.Errorf("stack %s env file: %w", stack.Name, err))
-			continue
-		}
+			envFile, err := envResolver.FileFromContent(resolvedEnv.Content)
+			if err != nil {
+				slog.Error("failed to prepare env file during validation", "stack", stack.Name, "error", err)
+				failedStacks = append(failedStacks, stack.Name)
+				validationErrs = append(validationErrs, fmt.Errorf("stack %s env file: %w", stack.Name, err))
+				continue
+			}
 
-		if err := r.validate(ctx, stack, envFile); err != nil {
-			slog.Error("stack validation failed", "stack", stack.Name, "error", err)
-			failedStacks = append(failedStacks, stack.Name)
-			validationErrs = append(validationErrs, fmt.Errorf("stack %s: %w", stack.Name, err))
+			if err := r.validate(ctx, stack, envFile); err != nil {
+				slog.Error("stack validation failed", "stack", stack.Name, "error", err)
+				failedStacks = append(failedStacks, stack.Name)
+				validationErrs = append(validationErrs, fmt.Errorf("stack %s: %w", stack.Name, err))
+			}
 		}
 	}
 
 	if len(validationErrs) > 0 {
 		sort.Strings(failedStacks)
-		return r.reportValidationFailure(ctx, "validating stack definitions", failedStacks, errors.Join(validationErrs...))
+		return r.reportValidationFailure(ctx, "validation failed", failedStacks, errors.Join(validationErrs...))
 	}
 
 	slog.Info("validation complete", "stacks", len(discovered), "networks", len(cfg.Networks))
@@ -443,6 +448,9 @@ func (r *Reconciler) notifyValidationFailed(ctx context.Context, err *Validation
 		lines = append(lines, fmt.Sprintf("Stacks: %s", strings.Join(err.FailedStacks, ", ")))
 	} else {
 		lines = append(lines, fmt.Sprintf("Error: %s", err.Summary))
+	}
+	if err.Err != nil {
+		lines = append(lines, fmt.Sprintf("Details: %v", err.Err))
 	}
 
 	params := map[string]string{"title": "Conflux validation failed"}
