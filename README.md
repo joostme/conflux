@@ -20,7 +20,7 @@ Conflux polls a git repository, discovers Docker Compose stacks, decrypts SOPS-e
 - **Per-stack fingerprinting** — only changed stacks redeploy
 - **SOPS + AGE secrets** — encrypted at rest, decrypted in memory
 - **Layered env/secret merging** — global + per-stack with `${VAR}` substitution
-- **Config files in containers** — Compose `configs:`/`secrets:` files trigger redeploys and can be SOPS-encrypted
+- **Config files in containers** — Compose `configs:`/`secrets:` files are injected via the Docker API, trigger redeploys and can be SOPS-encrypted
 - **Managed Docker networks** — pre-create shared networks before stacks deploy
 - **Notifications** — Shoutrrr-powered alerts on changes
 - **Auto-prune** — optional cleanup of unused images, volumes, and networks
@@ -252,7 +252,7 @@ networks:
 
 ## Files in containers
 
-Use Compose's own `configs:` (or `secrets:`) to put files into containers. Compose copies them in when the container is created, so this works even though Conflux runs in its own container.
+Use Compose's `configs:` (or `secrets:`) with `file:` to put repo files into containers:
 
 ```yaml
 services:
@@ -275,9 +275,10 @@ secrets:
     x-conflux-sops: true   # SOPS-decrypted in memory before deploy
 ```
 
-- Files referenced by top-level `configs:`/`secrets:` (`file:`) are part of the stack fingerprint, so editing one in git redeploys the stack. Paths that use `${VAR}` are not tracked.
-- `x-conflux-sops: true` makes Conflux decrypt the file with SOPS into a private temp file (mode `0600`) for the deploy and delete it afterwards.
-- Plain bind mounts (`volumes: ./file:/path`) do not work for repo files: the path would be resolved on the Docker host, not inside the Conflux container.
+- Conflux reads every `file:` config and secret itself and copies the content into the container through the Docker API. No host paths are bind-mounted, so this works although Conflux runs in its own container, and decrypted content is never written to disk.
+- Editing such a file in git redeploys the stack and recreates the affected services. Fingerprinting tracks `file:` paths that do not use `${VAR}`.
+- `x-conflux-sops: true` makes Conflux decrypt the file with SOPS before it is injected. Encrypt with `sops --encrypt --age <pubkey> --in-place <file>`.
+- Files must not be empty. Plain bind mounts (`volumes: ./file:/path`) do not work for repo files: the path would be resolved on the Docker host, not inside the Conflux container.
 
 ## Notifications
 
