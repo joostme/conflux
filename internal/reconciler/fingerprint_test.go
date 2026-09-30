@@ -79,3 +79,43 @@ func TestFingerprintStack_ChangesWithEnvContent(t *testing.T) {
 		t.Fatal("expected fingerprint to change when env content changes")
 	}
 }
+
+func TestFingerprintStack_ChangesWhenReferencedFileChanges(t *testing.T) {
+	dir := t.TempDir()
+	composeFile := filepath.Join(dir, "compose.yaml")
+	compose := "services:\n  app:\n    image: nginx\nconfigs:\n  site:\n    file: ./site.conf\nsecrets:\n  key:\n    file: ${KEY_PATH}\n"
+	if err := os.WriteFile(composeFile, []byte(compose), 0644); err != nil {
+		t.Fatal(err)
+	}
+	conf := filepath.Join(dir, "site.conf")
+	if err := os.WriteFile(conf, []byte("v1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stack := stacks.Stack{Name: "app", Dir: dir, ComposeFile: composeFile}
+
+	before, err := fingerprintStack(stack, "")
+	if err != nil {
+		t.Fatalf("fingerprintStack() error = %v", err)
+	}
+	if err := os.WriteFile(conf, []byte("v2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	after, err := fingerprintStack(stack, "")
+	if err != nil {
+		t.Fatalf("fingerprintStack() error = %v", err)
+	}
+	if before == after {
+		t.Fatal("fingerprint must change when a referenced config file changes")
+	}
+}
+
+func TestFingerprintStack_MissingReferencedFileFails(t *testing.T) {
+	dir := t.TempDir()
+	composeFile := filepath.Join(dir, "compose.yaml")
+	if err := os.WriteFile(composeFile, []byte("configs:\n  site:\n    file: ./nope.conf\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fingerprintStack(stacks.Stack{Name: "app", Dir: dir, ComposeFile: composeFile}, ""); err == nil {
+		t.Fatal("expected error for missing referenced file")
+	}
+}

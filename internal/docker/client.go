@@ -72,6 +72,12 @@ func (c *ComposeClient) Up(ctx context.Context, stack stacks.Stack, envFile stri
 		return fmt.Errorf("loading project %s: %w", stack.Name, err)
 	}
 
+	cleanup, err := decryptMarkedFiles(project)
+	if err != nil {
+		return fmt.Errorf("preparing files for %s: %w", stack.Name, err)
+	}
+	defer cleanup()
+
 	err = c.service.Up(ctx, project, api.UpOptions{
 		Create: api.CreateOptions{
 			RemoveOrphans: true,
