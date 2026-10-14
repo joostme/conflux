@@ -105,7 +105,7 @@ func inlineFileReferences(project *types.Project) error {
 
 		h := sha256.New()
 		for _, k := range keys {
-			fmt.Fprintf(h, "%s\x00%d\x00%s\x00", k, len(contents[k]), contents[k])
+			_, _ = fmt.Fprintf(h, "%s\x00%d\x00%s\x00", k, len(contents[k]), contents[k])
 		}
 		if svc.Labels == nil {
 			svc.Labels = types.Labels{}
