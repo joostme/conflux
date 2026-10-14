@@ -101,3 +101,33 @@ func TestInlineFileReferences_SkipsExternalAndContent(t *testing.T) {
 		t.Error("inline content must be left alone")
 	}
 }
+
+func TestInlineFileReferences_HashesInlineAndEnvironmentSources(t *testing.T) {
+	hash := func(content, env string) string {
+		p := &types.Project{
+			Environment: types.Mapping{"ROUTES": env},
+			Configs: types.Configs{
+				"inline": {Content: content},
+				"env":    {Environment: "ROUTES"},
+			},
+			Services: types.Services{
+				"proxy": {Name: "proxy", Configs: []types.ServiceConfigObjConfig{{Source: "inline"}, {Source: "env"}}},
+			},
+		}
+		if err := inlineFileReferences(p); err != nil {
+			t.Fatal(err)
+		}
+		return p.Services["proxy"].Labels[FilesHashLabel]
+	}
+
+	base := hash("a", "b")
+	if base == "" {
+		t.Fatal("service referencing inline or environment configs must get a hash label")
+	}
+	if base != hash("a", "b") {
+		t.Error("hash must be stable for identical content")
+	}
+	if base == hash("a2", "b") || base == hash("a", "b2") {
+		t.Error("hash must change when inline or environment content changes")
+	}
+}

@@ -14,9 +14,10 @@ import (
 // SOPSExtension marks a compose config or secret whose `file:` is SOPS-encrypted.
 const SOPSExtension = "x-conflux-sops"
 
-// FilesHashLabel carries a hash of the file contents a service references.
-// Compose only hashes service definitions, so this forces a container
-// recreate (and thus a fresh copy) when a referenced file changes.
+// FilesHashLabel carries a hash of the config and secret contents a service
+// references. Compose only hashes service definitions, not what it copies into
+// the container, so this forces a recreate (and thus a fresh copy) when a
+// referenced file, inline `content` or environment source changes.
 const FilesHashLabel = "io.conflux.files-hash"
 
 var decryptFile = func(path string) ([]byte, error) { return decrypt.File(path, "") }
@@ -27,9 +28,9 @@ var decryptFile = func(path string) ([]byte, error) { return decrypt.File(path, 
 // the Docker API instead of bind-mounting a host path, which would not exist
 // when Conflux itself runs in a container. Nothing is written to disk. The
 // environment source is used because Compose skips the bind mount for secrets
-// only in that case, not for inline `content`.
+// only in that case, not for inline `content`. Every service then gets a hash
+// of all config and secret contents it references, see FilesHashLabel.
 func inlineFileReferences(project *types.Project) error {
-	contents := map[string]string{}
 	if project.Environment == nil {
 		project.Environment = types.Mapping{}
 	}
@@ -53,7 +54,6 @@ func inlineFileReferences(project *types.Project) error {
 		if len(data) == 0 {
 			return "", fmt.Errorf("%s %s (%s) is empty, which Compose cannot inject", kind, name, file)
 		}
-		contents[kind+"/"+name] = string(data)
 		return string(data), nil
 	}
 
@@ -81,19 +81,25 @@ func inlineFileReferences(project *types.Project) error {
 	}
 
 	for name, svc := range project.Services {
-		var keys []string
-		for _, c := range svc.Configs {
-			if _, ok := contents["config/"+c.Source]; ok {
-				keys = append(keys, "config/"+c.Source)
+		contents := map[string]string{}
+		for _, ref := range svc.Configs {
+			c := project.Configs[ref.Source]
+			if content := injectedContent(project, c.Content, c.Environment); content != "" {
+				contents["config/"+ref.Source] = content
 			}
 		}
-		for _, s := range svc.Secrets {
-			if _, ok := contents["secret/"+s.Source]; ok {
-				keys = append(keys, "secret/"+s.Source)
+		for _, ref := range svc.Secrets {
+			s := project.Secrets[ref.Source]
+			if content := injectedContent(project, s.Content, s.Environment); content != "" {
+				contents["secret/"+ref.Source] = content
 			}
 		}
-		if len(keys) == 0 {
+		if len(contents) == 0 {
 			continue
+		}
+		keys := make([]string, 0, len(contents))
+		for k := range contents {
+			keys = append(keys, k)
 		}
 		sort.Strings(keys)
 
@@ -108,4 +114,16 @@ func inlineFileReferences(project *types.Project) error {
 		project.Services[name] = svc
 	}
 	return nil
+}
+
+// injectedContent returns what Compose copies into the container for a config
+// or secret: its inline content, or else the value of its environment source.
+func injectedContent(project *types.Project, content, env string) string {
+	if content != "" {
+		return content
+	}
+	if env != "" {
+		return project.Environment[env]
+	}
+	return ""
 }

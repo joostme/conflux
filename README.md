@@ -277,6 +277,7 @@ secrets:
 
 - Conflux reads every `file:` config and secret itself and copies the content into the container through the Docker API. No host paths are bind-mounted, so this works although Conflux runs in its own container, and decrypted content is never written to disk.
 - Editing such a file in git redeploys the stack and recreates the affected services. Fingerprinting tracks `file:` paths that do not use `${VAR}`.
+- Configs with inline `content:` and configs or secrets with `environment:` are injected the same way. Changing their content also recreates the services that use them.
 - `x-conflux-sops: true` makes Conflux decrypt the file with SOPS before it is injected. Encrypt with `sops --encrypt --age <pubkey> --in-place <file>`.
 - Files must not be empty. Plain bind mounts (`volumes: ./file:/path`) do not work for repo files: the path would be resolved on the Docker host, not inside the Conflux container.
 
